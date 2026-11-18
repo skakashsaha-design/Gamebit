@@ -65,6 +65,7 @@ import com.example.chess.Piece
 import com.example.chess.PieceColor
 import com.example.chess.PieceType
 import com.example.data.local.AppSettings
+import com.example.data.local.LocalGameEntity
 import com.example.data.remote.ExternalPlayerSummary
 import com.example.data.remote.PublicProfileDoc
 import com.example.ui.components.PieceMiniIcon
@@ -79,6 +80,8 @@ fun ProfileAndLookupTab(
     settings: AppSettings,
     myProfile: PublicProfileDoc?,
     externalSummary: ExternalPlayerSummary?,
+    savedGames: List<LocalGameEntity> = emptyList(),
+    onOpenSavedGame: (LocalGameEntity) -> Unit = {},
     onRequestSignIn: () -> Unit,
     onUpdateProfile: (String, String, String, String, Boolean) -> Unit,
     onUpdateLocalIdentity: (String, String) -> Unit,
@@ -115,10 +118,94 @@ fun ProfileAndLookupTab(
         "pawn" to PieceType.PAWN,
     )
 
+    val selectedAvatarType = avatarOptions.firstOrNull { it.first == settings.localAvatarId }?.second ?: PieceType.KNIGHT
+
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(14.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
+        // Hero Player Profile Summary Card
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth().testTag("profile_hero_card"),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f)),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.45f)),
+            ) {
+                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Surface(
+                            modifier = Modifier.size(60.dp),
+                            shape = RoundedCornerShape(16.dp),
+                            color = MaterialTheme.colorScheme.surface,
+                            border = BorderStroke(2.dp, MaterialTheme.colorScheme.primary),
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                PieceMiniIcon(
+                                    piece = Piece(selectedAvatarType, PieceColor.WHITE),
+                                    modifier = Modifier.size(42.dp),
+                                    pieceStyleId = settings.pieceStyleId,
+                                )
+                            }
+                        }
+                        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            ) {
+                                Text(
+                                    text = username.ifBlank { "ChessHub Player" },
+                                    style = MaterialTheme.typography.titleLarge,
+                                    fontWeight = FontWeight.Bold,
+                                )
+                                Text(
+                                    text = CountryCatalog.flagForIso(countryIso),
+                                    style = MaterialTheme.typography.titleMedium,
+                                )
+                            }
+                            Text(
+                                text = "FIDE: $fideFed • ${if (isOnline) "Cloud Synced" else "Local Offline Profile"}",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.primary,
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                            if (bio.isNotBlank()) {
+                                Text(
+                                    text = bio,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        ProfileStatTile(
+                            label = "Local Games",
+                            value = savedGames.size.toString(),
+                            modifier = Modifier.weight(1f),
+                        )
+                        ProfileStatTile(
+                            label = "Puzzle ELO",
+                            value = settings.localPuzzleRating.toString(),
+                            modifier = Modifier.weight(1f),
+                        )
+                        ProfileStatTile(
+                            label = "Best Streak",
+                            value = settings.puzzleBestStreak.toString(),
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
+                }
+            }
+        }
+
         item {
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -126,7 +213,7 @@ fun ProfileAndLookupTab(
                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
             ) {
                 Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Player Profile & Identity", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    Text("Edit Identity & Avatar", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                     Text("Choose Piece Avatar", style = MaterialTheme.typography.labelLarge)
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         avatarOptions.forEach { (id, type) ->
@@ -271,6 +358,67 @@ fun ProfileAndLookupTab(
             }
         }
 
+        // Local Match History & Results Summary
+        item {
+            val localWins = savedGames.count {
+                (it.whiteName == "You" && it.result == "1-0") || (it.blackName == "You" && it.result == "0-1")
+            }
+            val localDraws = savedGames.count { it.result == "1/2-1/2" }
+            val localLosses = (savedGames.size - localWins - localDraws).coerceAtLeast(0)
+
+            Card(
+                modifier = Modifier.fillMaxWidth().testTag("profile_local_history_card"),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+            ) {
+                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Local Game History (${savedGames.size})", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                    if (savedGames.isEmpty()) {
+                        Text(
+                            "No finished local games saved yet. Complete a game in Play to build your personal match history.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    } else {
+                        Text(
+                            "Summary: $localWins Wins • $localDraws Draws • $localLosses Losses/OTB",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                        savedGames.take(3).forEach { game ->
+                            Surface(
+                                shape = RoundedCornerShape(10.dp),
+                                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+                                modifier = Modifier.fillMaxWidth(),
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = "${game.whiteName} vs ${game.blackName} (${game.result})",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            fontWeight = FontWeight.SemiBold,
+                                        )
+                                        Text(
+                                            text = "${game.variant} • ${game.timeControl} • ${game.openingName.ifBlank { game.resultReason }}",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                    }
+                                    TextButton(onClick = { onOpenSavedGame(game) }) {
+                                        Text("Analyze")
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         // Badges & Titles
         item {
             val badges = listOf(
@@ -378,6 +526,28 @@ fun ProfileAndLookupTab(
                 if (isOnline) onUpdateProfile(username, bio, countryIso, fideFed, publicVisible)
             },
         )
+    }
+}
+
+@Composable
+private fun ProfileStatTile(
+    label: String,
+    value: String,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        modifier = modifier,
+        shape = RoundedCornerShape(10.dp),
+        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.9f),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 8.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Text(value, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.ExtraBold)
+            Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
     }
 }
 
@@ -612,14 +782,14 @@ fun SettingsAndAboutScreen(
             item {
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     listOf(
-                        Triple("move", "Move", settings.sfxMoveEnabled),
-                        Triple("capture", "Capture", settings.sfxCaptureEnabled),
-                        Triple("check", "Check", settings.sfxCheckEnabled),
-                        Triple("checkmate", "Mate/End", settings.sfxCheckmateEnabled),
-                        Triple("promotion", "Promotion", settings.sfxPromotionEnabled),
-                        Triple("feedback", "Puzzle SFX", settings.sfxFeedbackEnabled),
-                        Triple("button", "UI Click", settings.sfxButtonEnabled),
-                        Triple("book", "Book Move", settings.sfxBookEnabled),
+                        Triple("move", "Move", settings.sfxMove),
+                        Triple("capture", "Capture", settings.sfxCapture),
+                        Triple("check", "Check", settings.sfxCheck),
+                        Triple("checkmate", "Mate/End", settings.sfxCheckmate),
+                        Triple("promotion", "Promotion", settings.sfxPromotion),
+                        Triple("feedback", "Puzzle SFX", settings.sfxFeedback),
+                        Triple("button", "UI Click", settings.sfxButton),
+                        Triple("book", "Book Move", settings.sfxBookMove),
                     ).forEach { (key, label, active) ->
                         FilterChip(
                             selected = active,

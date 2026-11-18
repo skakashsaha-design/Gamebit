@@ -402,8 +402,8 @@ object PuzzlesAndLessonsCatalog {
         TacticalPuzzle(
             id = "cm_queen_mate",
             title = "King + Queen Basic Mate",
-            fen = "6k1/8/6K1/8/8/8/6Q1/8 w - - 0 1",
-            solutionUci = listOf("g2g7"),
+            fen = "6k1/8/6K1/8/8/8/1Q6/8 w - - 0 1",
+            solutionUci = listOf("b2g7"),
             rating = 700,
             themes = listOf("Mate in 1", "Endgame", "Checkmate Pattern"),
             hint = "Move your queen directly in front of the enemy king, guarded by your own king.",
@@ -595,11 +595,11 @@ object PuzzlesAndLessonsCatalog {
         EndgameExercise(
             id = "eg_qvr_1",
             category = "Queen vs Rook",
-            title = "Philidor Skewer Technique",
-            objective = "Use queen checks to separate the rook from the defending king.",
-            fen = "4k3/4r3/8/8/8/4Q3/8/4K3 w - - 0 1",
-            bestStartUci = "e3a7",
-            tip = "Target the fifth or seventh rank to fork or skewer the rook away from its king.",
+            title = "Queen vs Rook Fork Technique",
+            objective = "Use queen checks to separate and win the rook from the defending king.",
+            fen = "4k3/8/8/8/8/3Q4/2K5/7r w - - 0 1",
+            bestStartUci = "d3e4",
+            tip = "Check on an open file while aligning diagonally with the opponent's rook to win it cleanly.",
         ),
     )
 

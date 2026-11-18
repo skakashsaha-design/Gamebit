@@ -299,7 +299,7 @@ private fun AnalysisBoardTab(
                     }
                     state.endgameClassification?.let { eg ->
                         Text(
-                            text = "Endgame: ${eg.label} • ${eg.keyPrinciple}",
+                            text = "Endgame: ${eg.category} • ${eg.detail}",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.primary,
                         )

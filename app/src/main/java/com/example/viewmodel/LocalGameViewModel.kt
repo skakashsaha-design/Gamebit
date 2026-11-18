@@ -5,9 +5,9 @@ import androidx.lifecycle.viewModelScope
 import com.example.audio.ChessSoundType
 import com.example.audio.SoundAndHapticsManager
 import com.example.audio.VoiceCoachManager
+import com.example.chess.AiDifficulty
 import com.example.chess.BotProfile
 import com.example.chess.ChessBoardState
-import com.example.chess.ChessEngine
 import com.example.chess.ChessHubBots
 import com.example.chess.ChessVariant
 import com.example.chess.ClockType
@@ -15,9 +15,12 @@ import com.example.chess.EndgameClassification
 import com.example.chess.EndgameClassifier
 import com.example.chess.GambitMatch
 import com.example.chess.GameStatus
+import com.example.chess.KotlinChessEngineAdapter
+import com.example.chess.LocalChessEngine
 import com.example.chess.Move
 import com.example.chess.MoveGenerator
 import com.example.chess.MoveNode
+import com.example.chess.MoveValidationResult
 import com.example.chess.OpeningBook
 import com.example.chess.OpeningMatch
 import com.example.chess.PgnParser
@@ -48,6 +51,7 @@ data class LocalGameUiState(
     val variant: ChessVariant = ChessVariant.STANDARD,
     val timeControl: TimeControl = TimeControl.PRESETS[5],
     val humanColor: PieceColor = PieceColor.WHITE,
+    val aiDifficulty: AiDifficulty = AiDifficulty.fromBotProfile(ChessHubBots.ALL[2]),
     val bot: BotProfile = ChessHubBots.ALL[2],
     val botBlack: BotProfile = ChessHubBots.ALL[6],
     val botVsBotPaused: Boolean = false,
@@ -55,7 +59,9 @@ data class LocalGameUiState(
     val legalMoves: List<Move> = MoveGenerator.legalMoves(ChessBoardState.standard()),
     val moveHistorySan: List<String> = emptyList(),
     val moveHistoryUci: List<String> = emptyList(),
+    val moveHistoryMoves: List<Move> = emptyList(),
     val stateHistory: List<ChessBoardState> = listOf(ChessBoardState.standard()),
+    val viewingPly: Int = 0,
     val lastMove: Move? = null,
     val flipped: Boolean = false,
     val whiteTimeMs: Long = 300_000L,
@@ -75,12 +81,24 @@ data class LocalGameUiState(
     val botDialogueText: String = "",
     val savedToArchive: Boolean = false,
     val pendingConfirmMove: Move? = null,
-)
+) {
+    val isViewingLive: Boolean
+        get() = viewingPly >= moveHistorySan.size
+
+    val displayedBoardState: ChessBoardState
+        get() = stateHistory.getOrElse(viewingPly.coerceIn(0, stateHistory.lastIndex.coerceAtLeast(0))) { boardState }
+
+    val displayedLastMove: Move?
+        get() = if (viewingPly <= 0) null else moveHistoryMoves.getOrNull(viewingPly - 1)
+}
 
 class LocalGameViewModel(
     private val localRepo: LocalChessRepository,
     private val soundManager: SoundAndHapticsManager,
     private val voiceCoach: VoiceCoachManager? = null,
+    private val engineFactory: (lowMemoryMode: Boolean) -> LocalChessEngine = { lowMem ->
+        KotlinChessEngineAdapter(lowMemoryMode = lowMem)
+    },
 ) : ViewModel() {
     private val _uiState = MutableStateFlow(LocalGameUiState())
     val uiState: StateFlow<LocalGameUiState> = _uiState.asStateFlow()
@@ -134,17 +152,19 @@ class LocalGameViewModel(
         val startDialogue = if (mode != PlayMode.PASS_AND_PLAY) bot.dialogueFor("start", 0) else ""
         val endgame = if (currentSettings.endgameRecognitionEnabled) EndgameClassifier.classify(initial) else null
 
+        val engine = engineFactory(currentSettings.lowMemoryMode)
         _uiState.value = LocalGameUiState(
             gameId = UUID.randomUUID().toString(),
             mode = mode,
             variant = variant,
             timeControl = timeControl,
             humanColor = humanColor,
+            aiDifficulty = AiDifficulty.fromBotProfile(bot),
             bot = bot,
             botBlack = botBlack,
             botVsBotPaused = false,
             boardState = initial,
-            legalMoves = MoveGenerator.legalMoves(initial),
+            legalMoves = engine.legalMoves(initial),
             flipped = mode == PlayMode.VS_BOT && humanColor == PieceColor.BLACK,
             whiteTimeMs = initialMs,
             blackTimeMs = initialMs,
@@ -161,6 +181,21 @@ class LocalGameViewModel(
             triggerBotMove()
         }
     }
+
+    fun selectDifficulty(difficulty: AiDifficulty) {
+        val curr = _uiState.value
+        val matchedBot = difficulty.toBotProfile()
+        _uiState.update {
+            it.copy(
+                aiDifficulty = difficulty,
+                bot = matchedBot,
+                botDialogueText = if (curr.mode != PlayMode.PASS_AND_PLAY) matchedBot.dialogueFor("start", curr.moveHistorySan.size) else "",
+            )
+        }
+    }
+
+    fun isMoveValid(move: Move): Boolean =
+        engineFactory(currentSettings.lowMemoryMode).isMoveLegal(_uiState.value.boardState, move)
 
     fun toggleBotVsBotPause() {
         val curr = _uiState.value
@@ -181,9 +216,88 @@ class LocalGameViewModel(
         triggerBotMove(forceSingleStep = true)
     }
 
+    fun jumpToPly(ply: Int) {
+        _uiState.update { curr ->
+            val clamped = ply.coerceIn(0, curr.moveHistorySan.size)
+            curr.copy(viewingPly = clamped)
+        }
+    }
+
+    fun stepFirstMove() = jumpToPly(0)
+
+    fun stepPreviousMove() = jumpToPly(_uiState.value.viewingPly - 1)
+
+    fun stepNextMove() = jumpToPly(_uiState.value.viewingPly + 1)
+
+    fun stepLatestMove() = jumpToPly(_uiState.value.moveHistorySan.size)
+
+    fun importPgnIntoLocalGame(pgnText: String): Boolean {
+        val parsed = PgnParser.parseMultiGamePgn(pgnText).getOrNull()?.firstOrNull() ?: return false
+        clockJob?.cancel()
+        botJob?.cancel()
+        positionCounts.clear()
+
+        val mainNodes = parsed.rootNode.mainLine()
+        val initial = parsed.rootNode.state
+        val engine = engineFactory(currentSettings.lowMemoryMode)
+
+        rootNode = parsed.rootNode
+        currentNode = if (mainNodes.isEmpty()) parsed.rootNode else mainNodes.last()
+
+        val states = mutableListOf(initial)
+        val sans = mutableListOf<String>()
+        val ucis = mutableListOf<String>()
+        val moves = mutableListOf<Move>()
+        positionCounts[initial.positionKey()] = 1
+
+        mainNodes.forEach { node ->
+            val m = node.move ?: return@forEach
+            states.add(node.state)
+            sans.add(node.san)
+            ucis.add(m.uci)
+            moves.add(m)
+            val key = node.state.positionKey()
+            positionCounts[key] = (positionCounts[key] ?: 0) + 1
+        }
+
+        val finalState = states.last()
+        val (status, winner) = MoveGenerator.evaluateGameResult(finalState, positionCounts)
+        val tc = _uiState.value.timeControl
+        val initialMs = if (tc.clockType == ClockType.UNLIMITED) 0L else tc.initialSeconds * 1000L
+
+        _uiState.value = LocalGameUiState(
+            gameId = UUID.randomUUID().toString(),
+            mode = PlayMode.PASS_AND_PLAY,
+            variant = initial.variant,
+            timeControl = tc,
+            humanColor = PieceColor.WHITE,
+            aiDifficulty = _uiState.value.aiDifficulty,
+            bot = _uiState.value.bot,
+            botBlack = _uiState.value.botBlack,
+            boardState = finalState,
+            legalMoves = if (status.isTerminal) emptyList() else engine.legalMoves(finalState),
+            moveHistorySan = sans,
+            moveHistoryUci = ucis,
+            moveHistoryMoves = moves,
+            stateHistory = states,
+            viewingPly = sans.size,
+            lastMove = moves.lastOrNull(),
+            whiteTimeMs = initialMs,
+            blackTimeMs = initialMs,
+            gameStatus = status,
+            winner = winner,
+            openingMatch = if (initial.variant == ChessVariant.STANDARD) OpeningBook.recognize(ucis) else null,
+            gambitMatch = if (initial.variant == ChessVariant.STANDARD) OpeningBook.recognizeGambit(ucis) else null,
+            endgameClassification = if (currentSettings.endgameRecognitionEnabled) EndgameClassifier.classify(finalState) else null,
+            coachMessage = "Loaded PGN (${sans.size} plies). Use the move list or arrows to step back and forth.",
+        )
+        startClockLoop()
+        return true
+    }
+
     fun onUserMove(move: Move) {
         val curr = _uiState.value
-        if (curr.gameStatus.isTerminal || curr.mode == PlayMode.BOT_VS_BOT) return
+        if (!curr.isViewingLive || curr.gameStatus.isTerminal || curr.mode == PlayMode.BOT_VS_BOT) return
         if (currentSettings.confirmMoves && curr.pendingConfirmMove == null) {
             _uiState.update { it.copy(pendingConfirmMove = move) }
             return
@@ -244,6 +358,7 @@ class LocalGameViewModel(
         val newStates = curr.stateHistory.dropLast(stepsBack)
         val newSans = curr.moveHistorySan.dropLast(stepsBack)
         val newUcis = curr.moveHistoryUci.dropLast(stepsBack)
+        val newMoves = curr.moveHistoryMoves.dropLast(stepsBack)
         val restored = newStates.last()
 
         repeat(stepsBack) {
@@ -257,13 +372,16 @@ class LocalGameViewModel(
             val k = st.positionKey()
             positionCounts[k] = (positionCounts[k] ?: 0) + 1
         }
+        val engine = engineFactory(currentSettings.lowMemoryMode)
         _uiState.update {
             it.copy(
                 boardState = restored,
-                legalMoves = MoveGenerator.legalMoves(restored),
+                legalMoves = engine.legalMoves(restored),
                 stateHistory = newStates,
                 moveHistorySan = newSans,
                 moveHistoryUci = newUcis,
+                moveHistoryMoves = newMoves,
+                viewingPly = newSans.size,
                 lastMove = currentNode.move,
                 isBotThinking = false,
                 hintMove = null,
@@ -277,10 +395,15 @@ class LocalGameViewModel(
         val curr = _uiState.value
         if (curr.gameStatus.isTerminal || curr.isBotThinking) return
         viewModelScope.launch {
-            val engine = ChessEngine(currentSettings.lowMemoryMode)
-            val line = engine.evaluateBest(curr.boardState, depth = currentSettings.engineDepth.coerceIn(2, 4), timeLimitMs = 700L)
+            val engine = engineFactory(currentSettings.lowMemoryMode)
+            val hintDifficulty = when {
+                currentSettings.engineDepth >= 4 -> AiDifficulty.EXPERT
+                currentSettings.engineDepth == 3 -> AiDifficulty.HARD
+                else -> AiDifficulty.MEDIUM
+            }
+            val line = engine.evaluateBestMove(curr.boardState, difficulty = hintDifficulty)
             val best = line?.pvMoves?.firstOrNull()
-            val coach = engine.explainCurrentPosition(curr.boardState, line)
+            val coach = engine.explainPosition(curr.boardState, line)
             _uiState.update { it.copy(hintMove = best, coachMessage = coach) }
             voiceCoach?.speakTrainer(coach, currentSettings)
         }
@@ -289,20 +412,22 @@ class LocalGameViewModel(
     private fun executeMove(move: Move, fromBot: Boolean = false) {
         val curr = _uiState.value
         if (curr.gameStatus.isTerminal) return
-        val legal = curr.legalMoves
-        val validMove = legal.firstOrNull {
-            it.from == move.from && it.to == move.to &&
-                (it.promotion == move.promotion || (move.promotion == null && it.promotion == PieceType.QUEEN)) &&
-                it.dropPieceType == move.dropPieceType
-        } ?: run {
+        val engine = engineFactory(currentSettings.lowMemoryMode)
+        val validation = engine.validateMove(curr.boardState, move, positionCounts)
+        if (validation !is MoveValidationResult.Valid) {
             soundManager.play(ChessSoundType.ERROR, currentSettings)
             return
         }
 
+        val validMove = validation.resolvedMove
+        val san = validation.san
+        val nextState = validation.nextState
+        val status = validation.gameStatus
+        val winner = validation.winner
+        val isCheckNow = validation.isCheck
+
         val mover = curr.boardState.sideToMove
         val wasCapture = curr.boardState.pieceAt(validMove.to) != null || validMove.isEnPassant
-        val san = MoveGenerator.toSan(curr.boardState, validMove, legal)
-        val nextState = MoveGenerator.applyMoveUnchecked(curr.boardState, validMove)
         val posKey = nextState.positionKey()
         positionCounts[posKey] = (positionCounts[posKey] ?: 0) + 1
         currentNode = currentNode.addOrGetChild(validMove, san, nextState)
@@ -320,8 +445,6 @@ class LocalGameViewModel(
             OpeningBook.getLocalBookMoves(curr.boardState, curr.moveHistoryUci).any { it.uci == validMove.uci }
 
         val (newWhiteMs, newBlackMs) = applyIncrement(curr.whiteTimeMs, curr.blackTimeMs, mover, curr.timeControl)
-        val (status, winner) = MoveGenerator.evaluateGameResult(nextState, positionCounts)
-        val isCheckNow = MoveGenerator.isKingInCheck(nextState, nextState.sideToMove)
 
         val soundType = when {
             status.isTerminal -> ChessSoundType.GAME_END
@@ -351,12 +474,15 @@ class LocalGameViewModel(
         }
 
         _uiState.update {
+            val updatedSans = it.moveHistorySan + san
             it.copy(
                 boardState = nextState,
-                legalMoves = if (status.isTerminal) emptyList() else MoveGenerator.legalMoves(nextState),
-                moveHistorySan = it.moveHistorySan + san,
+                legalMoves = if (status.isTerminal) emptyList() else engine.legalMoves(nextState),
+                moveHistorySan = updatedSans,
                 moveHistoryUci = newUcis,
+                moveHistoryMoves = it.moveHistoryMoves + validMove,
                 stateHistory = it.stateHistory + nextState,
+                viewingPly = updatedSans.size,
                 lastMove = validMove,
                 whiteTimeMs = newWhiteMs,
                 blackTimeMs = newBlackMs,
@@ -408,7 +534,7 @@ class LocalGameViewModel(
                 curr.bot
             }
             _uiState.update { it.copy(isBotThinking = true) }
-            val engine = ChessEngine(currentSettings.lowMemoryMode)
+            val engine = engineFactory(currentSettings.lowMemoryMode)
             val chosen = engine.chooseBotMove(
                 state = curr.boardState,
                 bot = activeBot,

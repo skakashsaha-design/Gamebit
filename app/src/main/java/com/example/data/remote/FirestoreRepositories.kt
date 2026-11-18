@@ -163,18 +163,20 @@ class ChessHubOnlineRepository(
             }.sortedByDescending { it.blitzRating }
         }
 
-    suspend fun fetchOpponentRating(opponentUid: String, timeCategory: String): Double = try {
-        if (opponentUid.isBlank()) return 1500.0
-        val doc = db.collection("publicProfiles").document(opponentUid).get().await()
-        val prof = doc.toObject(PublicProfileDoc::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
-        when (timeCategory) {
-            "bullet" -> prof?.bulletRating ?: 1500L
-            "blitz" -> prof?.blitzRating ?: 1500L
-            "rapid" -> prof?.rapidRating ?: 1500L
-            else -> prof?.classicalRating ?: 1500L
-        }.toDouble()
-    } catch (_: Exception) {
-        1500.0
+    suspend fun fetchOpponentRating(opponentUid: String, timeCategory: String): Double {
+        return try {
+            if (opponentUid.isBlank()) return 1500.0
+            val doc = db.collection("publicProfiles").document(opponentUid).get().await()
+            val prof = doc.toObject(PublicProfileDoc::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
+            when (timeCategory) {
+                "bullet" -> prof?.bulletRating ?: 1500L
+                "blitz" -> prof?.blitzRating ?: 1500L
+                "rapid" -> prof?.rapidRating ?: 1500L
+                else -> prof?.classicalRating ?: 1500L
+            }.toDouble()
+        } catch (_: Exception) {
+            1500.0
+        }
     }
 
     suspend fun updateProfileIdentity(

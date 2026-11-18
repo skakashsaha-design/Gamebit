@@ -691,6 +691,13 @@ private fun ChessHubMainShell(
                                 onlineVm?.closeActiveOnlineGame()
                             },
                             onRequestOnlineSignIn = onSwitchToOnlineSignIn,
+                            onJumpToPly = { localGameVm.jumpToPly(it) },
+                            onStepFirstMove = { localGameVm.stepFirstMove() },
+                            onStepPreviousMove = { localGameVm.stepPreviousMove() },
+                            onStepNextMove = { localGameVm.stepNextMove() },
+                            onStepLatestMove = { localGameVm.stepLatestMove() },
+                            onExportLocalPgn = { localGameVm.exportCurrentPgn() },
+                            onImportLocalPgn = { pgn -> localGameVm.importPgnIntoLocalGame(pgn) },
                         )
                         2 -> LearnScreen(
                             settings = settings,
@@ -871,6 +878,11 @@ private fun ChessHubMainShell(
                                 if (analysisVm.importPgn(pgn)) selectedTab = 3
                             },
                             onSignOut = onSignOut,
+                            savedGames = savedGames,
+                            onOpenSavedGame = { game ->
+                                analysisVm.loadSavedGame(game)
+                                selectedTab = 3
+                            },
                         )
                     }
                 }

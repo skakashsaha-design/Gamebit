@@ -56,6 +56,7 @@ import com.example.chess.ChessVariant
 import com.example.chess.CountryCatalog
 import com.example.chess.TimeControl
 import com.example.data.local.AppSettings
+import com.example.data.local.LocalGameEntity
 import com.example.data.remote.AbuseReportDoc
 import com.example.data.remote.CloudStudyDoc
 import com.example.data.remote.ClubDoc
@@ -122,6 +123,8 @@ fun CommunityHubScreen(
     onLookupExternalPlayer: (String, String) -> Unit,
     onImportExternalPgn: (String) -> Unit,
     onSignOut: () -> Unit,
+    savedGames: List<LocalGameEntity> = emptyList(),
+    onOpenSavedGame: (LocalGameEntity) -> Unit = {},
 ) {
     var selectedTab by remember { mutableIntStateOf(0) }
     var reportTarget by remember { mutableStateOf<Pair<String, String>?>(null) }
@@ -215,6 +218,8 @@ fun CommunityHubScreen(
                 settings = settings,
                 myProfile = myProfile,
                 externalSummary = externalPlayerSummary,
+                savedGames = savedGames,
+                onOpenSavedGame = onOpenSavedGame,
                 onRequestSignIn = onRequestSignIn,
                 onUpdateProfile = onUpdateProfile,
                 onUpdateLocalIdentity = onUpdateLocalIdentity,
