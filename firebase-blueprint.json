@@ -1,0 +1,335 @@
+{
+  "entities": {
+    "UserPrivate": {
+      "title": "UserPrivate",
+      "description": "Private user settings and preferences isolated to the owner.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "displayName": { "type": "string" },
+        "countryIso": { "type": "string" },
+        "fideFederation": { "type": "string" },
+        "privacyPublicProfile": { "type": "boolean" },
+        "privacyAllowMessages": { "type": "boolean" },
+        "privacyShowOnline": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "displayName", "countryIso", "fideFederation", "privacyPublicProfile", "privacyAllowMessages", "privacyShowOnline", "createdAt", "updatedAt"]
+    },
+    "PublicProfile": {
+      "title": "PublicProfile",
+      "description": "Publicly visible chess profile without PII.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "username": { "type": "string" },
+        "bio": { "type": "string" },
+        "countryIso": { "type": "string" },
+        "fideFederation": { "type": "string" },
+        "bulletRating": { "type": "integer" },
+        "blitzRating": { "type": "integer" },
+        "rapidRating": { "type": "integer" },
+        "classicalRating": { "type": "integer" },
+        "puzzleRating": { "type": "integer" },
+        "gamesPlayed": { "type": "integer" },
+        "wins": { "type": "integer" },
+        "draws": { "type": "integer" },
+        "losses": { "type": "integer" },
+        "studyCount": { "type": "integer" },
+        "achievementsCount": { "type": "integer" },
+        "onlineStatus": { "type": "string", "enum": ["online", "playing", "offline"] },
+        "publicVisible": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "username", "countryIso", "fideFederation", "bulletRating", "blitzRating", "rapidRating", "classicalRating", "puzzleRating", "gamesPlayed", "wins", "draws", "losses", "studyCount", "achievementsCount", "onlineStatus", "publicVisible", "createdAt", "updatedAt"]
+    },
+    "MatchTicket": {
+      "title": "MatchTicket",
+      "description": "Matchmaking queue request for online pairing.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "username": { "type": "string" },
+        "rating": { "type": "integer" },
+        "variant": { "type": "string" },
+        "timeControl": { "type": "string" },
+        "ratedGame": { "type": "boolean" },
+        "minRating": { "type": "integer" },
+        "maxRating": { "type": "integer" },
+        "status": { "type": "string", "enum": ["waiting", "matched", "cancelled"] },
+        "matchedGameId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "username", "rating", "variant", "timeControl", "ratedGame", "minRating", "maxRating", "status", "createdAt", "updatedAt"]
+    },
+    "OnlineGame": {
+      "title": "OnlineGame",
+      "description": "ChessHub online multiplayer game document.",
+      "type": "object",
+      "properties": {
+        "whiteUid": { "type": "string" },
+        "blackUid": { "type": "string" },
+        "whiteName": { "type": "string" },
+        "blackName": { "type": "string" },
+        "participantUids": { "type": "array" },
+        "variant": { "type": "string" },
+        "timeControl": { "type": "string" },
+        "initialTimeMs": { "type": "integer" },
+        "incrementMs": { "type": "integer" },
+        "delayMs": { "type": "integer" },
+        "ratedGame": { "type": "boolean" },
+        "status": { "type": "string", "enum": ["waiting", "active", "finished", "aborted"] },
+        "fen": { "type": "string" },
+        "pgn": { "type": "string" },
+        "lastMoveUci": { "type": "string" },
+        "moveCount": { "type": "integer" },
+        "turn": { "type": "string", "enum": ["w", "b"] },
+        "whiteTimeMs": { "type": "integer" },
+        "blackTimeMs": { "type": "integer" },
+        "drawOfferBy": { "type": "string" },
+        "takebackOfferBy": { "type": "string" },
+        "result": { "type": "string" },
+        "resultReason": { "type": "string" },
+        "winnerUid": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["whiteUid", "blackUid", "whiteName", "blackName", "participantUids", "variant", "timeControl", "initialTimeMs", "incrementMs", "delayMs", "ratedGame", "status", "fen", "pgn", "moveCount", "turn", "whiteTimeMs", "blackTimeMs", "createdAt", "updatedAt"]
+    },
+    "GameChatMessage": {
+      "title": "GameChatMessage",
+      "description": "Chat message inside an online game.",
+      "type": "object",
+      "properties": {
+        "senderUid": { "type": "string" },
+        "senderName": { "type": "string" },
+        "text": { "type": "string" },
+        "participantUids": { "type": "array" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["senderUid", "senderName", "text", "participantUids", "createdAt"]
+    },
+    "Friendship": {
+      "title": "Friendship",
+      "description": "Friend request or active friendship.",
+      "type": "object",
+      "properties": {
+        "requesterUid": { "type": "string" },
+        "recipientUid": { "type": "string" },
+        "memberUids": { "type": "array" },
+        "requesterName": { "type": "string" },
+        "recipientName": { "type": "string" },
+        "status": { "type": "string", "enum": ["pending", "accepted", "blocked"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["requesterUid", "recipientUid", "memberUids", "requesterName", "recipientName", "status", "createdAt", "updatedAt"]
+    },
+    "MessageThread": {
+      "title": "MessageThread",
+      "description": "Private messaging thread metadata.",
+      "type": "object",
+      "properties": {
+        "memberUids": { "type": "array" },
+        "lastMessage": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["memberUids", "lastMessage", "createdAt", "updatedAt"]
+    },
+    "DirectMessage": {
+      "title": "DirectMessage",
+      "description": "Direct message within a thread.",
+      "type": "object",
+      "properties": {
+        "senderUid": { "type": "string" },
+        "senderName": { "type": "string" },
+        "text": { "type": "string" },
+        "memberUids": { "type": "array" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["senderUid", "senderName", "text", "memberUids", "createdAt"]
+    },
+    "CloudStudy": {
+      "title": "CloudStudy",
+      "description": "Shared or private ChessHub study.",
+      "type": "object",
+      "properties": {
+        "ownerUid": { "type": "string" },
+        "ownerName": { "type": "string" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "pgn": { "type": "string" },
+        "tags": { "type": "array" },
+        "publicVisible": { "type": "boolean" },
+        "collaboratorUids": { "type": "array" },
+        "chapterCount": { "type": "integer" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["ownerUid", "ownerName", "title", "description", "pgn", "tags", "publicVisible", "collaboratorUids", "chapterCount", "createdAt", "updatedAt"]
+    },
+    "Club": {
+      "title": "Club",
+      "description": "ChessHub club community.",
+      "type": "object",
+      "properties": {
+        "ownerUid": { "type": "string" },
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "countryIso": { "type": "string" },
+        "memberUids": { "type": "array" },
+        "memberCount": { "type": "integer" },
+        "publicVisible": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["ownerUid", "name", "description", "countryIso", "memberUids", "memberCount", "publicVisible", "createdAt", "updatedAt"]
+    },
+    "ClubMessage": {
+      "title": "ClubMessage",
+      "description": "Club forum announcement or message.",
+      "type": "object",
+      "properties": {
+        "senderUid": { "type": "string" },
+        "senderName": { "type": "string" },
+        "text": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["senderUid", "senderName", "text", "createdAt"]
+    },
+    "Team": {
+      "title": "Team",
+      "description": "ChessHub team for team battles.",
+      "type": "object",
+      "properties": {
+        "captainUid": { "type": "string" },
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "memberUids": { "type": "array" },
+        "ratingAvg": { "type": "integer" },
+        "publicVisible": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["captainUid", "name", "description", "memberUids", "ratingAvg", "publicVisible", "createdAt", "updatedAt"]
+    },
+    "Tournament": {
+      "title": "Tournament",
+      "description": "Arena or Swiss tournament.",
+      "type": "object",
+      "properties": {
+        "creatorUid": { "type": "string" },
+        "name": { "type": "string" },
+        "format": { "type": "string", "enum": ["arena", "swiss", "simul"] },
+        "variant": { "type": "string" },
+        "timeControl": { "type": "string" },
+        "ratedGame": { "type": "boolean" },
+        "status": { "type": "string", "enum": ["upcoming", "active", "finished"] },
+        "round": { "type": "integer" },
+        "maxRounds": { "type": "integer" },
+        "participantUids": { "type": "array" },
+        "publicVisible": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["creatorUid", "name", "format", "variant", "timeControl", "ratedGame", "status", "round", "maxRounds", "participantUids", "publicVisible", "createdAt", "updatedAt"]
+    },
+    "TournamentEntry": {
+      "title": "TournamentEntry",
+      "description": "Player standing entry inside a tournament.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "username": { "type": "string" },
+        "rating": { "type": "integer" },
+        "points": { "type": "integer" },
+        "streak": { "type": "integer" },
+        "gamesPlayed": { "type": "integer" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "username", "rating", "points", "streak", "gamesPlayed", "createdAt", "updatedAt"]
+    },
+    "AbuseReport": {
+      "title": "AbuseReport",
+      "description": "Moderation report submitted by a user.",
+      "type": "object",
+      "properties": {
+        "reporterUid": { "type": "string" },
+        "targetUid": { "type": "string" },
+        "category": { "type": "string" },
+        "details": { "type": "string" },
+        "status": { "type": "string", "enum": ["open", "reviewed", "resolved"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["reporterUid", "targetUid", "category", "details", "status", "createdAt", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserPrivate" },
+      "description": "Private user account settings."
+    },
+    "/publicProfiles/{userId}": {
+      "schema": { "$ref": "#/entities/PublicProfile" },
+      "description": "Public chess profiles and ratings."
+    },
+    "/matchmaking/{ticketId}": {
+      "schema": { "$ref": "#/entities/MatchTicket" },
+      "description": "Matchmaking queue tickets."
+    },
+    "/games/{gameId}": {
+      "schema": { "$ref": "#/entities/OnlineGame" },
+      "description": "Online ChessHub games."
+    },
+    "/games/{gameId}/chat/{messageId}": {
+      "schema": { "$ref": "#/entities/GameChatMessage" },
+      "description": "In-game chat messages."
+    },
+    "/friends/{friendshipId}": {
+      "schema": { "$ref": "#/entities/Friendship" },
+      "description": "User friendships and requests."
+    },
+    "/messages/{threadId}": {
+      "schema": { "$ref": "#/entities/MessageThread" },
+      "description": "Direct messaging threads."
+    },
+    "/messages/{threadId}/items/{msgId}": {
+      "schema": { "$ref": "#/entities/DirectMessage" },
+      "description": "Messages inside a direct messaging thread."
+    },
+    "/studies/{studyId}": {
+      "schema": { "$ref": "#/entities/CloudStudy" },
+      "description": "Cloud-synced and shared chess studies."
+    },
+    "/clubs/{clubId}": {
+      "schema": { "$ref": "#/entities/Club" },
+      "description": "ChessHub clubs."
+    },
+    "/clubs/{clubId}/messages/{msgId}": {
+      "schema": { "$ref": "#/entities/ClubMessage" },
+      "description": "Club announcements and forum messages."
+    },
+    "/teams/{teamId}": {
+      "schema": { "$ref": "#/entities/Team" },
+      "description": "ChessHub teams."
+    },
+    "/tournaments/{tournamentId}": {
+      "schema": { "$ref": "#/entities/Tournament" },
+      "description": "Arena, Swiss, and Simul tournaments."
+    },
+    "/tournaments/{tournamentId}/entries/{entryId}": {
+      "schema": { "$ref": "#/entities/TournamentEntry" },
+      "description": "Tournament player entries and standings."
+    },
+    "/reports/{reportId}": {
+      "schema": { "$ref": "#/entities/AbuseReport" },
+      "description": "Moderation and fair-play reports."
+    }
+  }
+}

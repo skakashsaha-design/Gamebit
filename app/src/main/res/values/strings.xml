@@ -1,0 +1,32 @@
+<resources>
+    <string name="app_name">ChessHub</string>
+    <string name="nav_home">Home</string>
+    <string name="nav_play">Play</string>
+    <string name="nav_learn">Learn</string>
+    <string name="nav_analyze">Analyze</string>
+    <string name="nav_community">Hub</string>
+    <string name="status_offline">Offline Mode</string>
+    <string name="status_online">Online</string>
+    <string name="sign_in_google">Sign in with Google</string>
+    <string name="continue_offline">Continue Offline</string>
+    <string name="sign_out">Sign Out</string>
+    <string name="home_subtitle">Play, analyze, train, and compete</string>
+    <string name="quick_game">Quick Game</string>
+    <string name="play_bots">Play Bots</string>
+    <string name="over_the_board">Over the Board</string>
+    <string name="daily_puzzle">Daily Puzzle</string>
+    <string name="puzzle_streak">Puzzle Streak</string>
+    <string name="puzzle_storm">Puzzle Storm</string>
+    <string name="puzzle_racer">Puzzle Racer</string>
+    <string name="opening_explorer">Opening Explorer</string>
+    <string name="game_review">Game Review</string>
+    <string name="board_editor">Board Editor</string>
+    <string name="studies">Studies</string>
+    <string name="tournaments">Tournaments</string>
+    <string name="clubs_teams">Clubs &amp; Teams</string>
+    <string name="watch_broadcasts">Watch &amp; Broadcasts</string>
+    <string name="leaderboards">Leaderboards</string>
+    <string name="settings">Settings</string>
+    <string name="profile">Profile</string>
+    <string name="independent_notice">ChessHub is an independent chess platform and is not affiliated with or endorsed by Lichess or Chess.com.</string>
+</resources>

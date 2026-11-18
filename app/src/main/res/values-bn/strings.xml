@@ -1,0 +1,32 @@
+<resources>
+    <string name="app_name">চেসহাব</string>
+    <string name="nav_home">হোম</string>
+    <string name="nav_play">খেলুন</string>
+    <string name="nav_learn">শিখুন</string>
+    <string name="nav_analyze">বিশ্লেষণ</string>
+    <string name="nav_community">কমিউনিটি</string>
+    <string name="status_offline">অফলাইন মোড</string>
+    <string name="status_online">অনলাইন</string>
+    <string name="sign_in_google">গুগল দিয়ে সাইন ইন</string>
+    <string name="continue_offline">অফলাইনে চালিয়ে যান</string>
+    <string name="sign_out">সাইন আউট</string>
+    <string name="home_subtitle">খেলুন, বিশ্লেষণ করুন, শিখুন এবং প্রতিযোগিতা করুন</string>
+    <string name="quick_game">দ্রুত খেলা</string>
+    <string name="play_bots">বটের সাথে খেলুন</string>
+    <string name="over_the_board">মুখোমুখি খেলা</string>
+    <string name="daily_puzzle">দৈনিক পাজল</string>
+    <string name="puzzle_streak">পাজল স্ট্রিক</string>
+    <string name="puzzle_storm">পাজল স্টর্ম</string>
+    <string name="puzzle_racer">পাজল রেসার</string>
+    <string name="opening_explorer">ওপেনিং এক্সপ্লোরার</string>
+    <string name="game_review">গেম রিভিউ</string>
+    <string name="board_editor">বোর্ড এডিটর</string>
+    <string name="studies">স্টাডিজ</string>
+    <string name="tournaments">টুর্নামেন্ট</string>
+    <string name="clubs_teams">ক্লাব ও টিম</string>
+    <string name="watch_broadcasts">লাইভ খেলা ও ব্রডকাস্ট</string>
+    <string name="leaderboards">লিডারবোর্ড</string>
+    <string name="settings">সেটিংস</string>
+    <string name="profile">প্রোফাইল</string>
+    <string name="independent_notice">চেসহাব একটি স্বতন্ত্র দাবা প্ল্যাটফর্ম এবং লিচেস বা চেস.কমের সাথে সম্পর্কিত নয়।</string>
+</resources>

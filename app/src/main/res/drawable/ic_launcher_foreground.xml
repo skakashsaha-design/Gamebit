@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Emerald base pedestal -->
+    <path
+        android:fillColor="#10B981"
+        android:pathData="M31,73 L77,73 L79,79 L29,79 Z" />
+    <!-- Bold ChessHub Knight + Crown silhouette centered in 66dp safe zone -->
+    <path
+        android:fillColor="#F8FAFC"
+        android:pathData="M36,71 L72,71 L70,63 C70,50 65,37 56,31 L58,25 L50,28 L45,25 L44,32 C39,34 33,40 31,45 L35,49 L44,46 L46,49 C40,54 37,61 36,71 Z" />
+    <!-- Emerald eye accent -->
+    <path
+        android:fillColor="#10B981"
+        android:pathData="M43,36 A2.2,2.2 0 1,1 43,40.4 A2.2,2.2 0 1,1 43,36 Z" />
+</vector>

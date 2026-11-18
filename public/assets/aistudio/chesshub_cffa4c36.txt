@@ -1,0 +1,297 @@
+CHESSHUB: ULTIMATE COMPLETE MASTER BUILD PROMPT
+VERSION: 2.0
+IMPORTANT: THIS IS A NEW BUILD FROM SCRATCH. DO NOT PATCH THE OLD BROKEN CHESSHUB APP.
+Build a complete, production-quality Android chess application named ChessHub. Use the uploaded project specification and the uploaded Lichess Mobile v0.30.3 Flutter/Dart source archive as technical source material. Inspect the supplied source before implementation. The Lichess archive is a mobile client, not the complete Lichess server/backend. Use suitable source components only after checking their licenses and technical compatibility. The final application must have original ChessHub branding, UI, architecture, backend, database, package ID, configuration, and release identity. Do not make ChessHub appear to be an official Lichess or Chess.com application.
+
+1. NEW FOUNDATION
+   Create a clean Flutter/Dart project from scratch. Do not carry forward the old application's broken layout, overlapping overlays, unreliable touch handlers, tangled state, broken navigation, fake buttons, or unfinished feature wiring. Use clean modular architecture with UI, domain, chess logic, repositories, local storage, networking, authentication, backend services, engine services, and feature modules separated clearly. Use Riverpod/Freezed or suitable architecture from the supplied Lichess source where technically appropriate. Keep dependencies minimal.
+2. SOURCE ARCHIVE INTEGRATION
+   Inspect the uploaded Lichess Mobile v0.30.3 archive. Reuse or adapt useful components for chessboard rendering, chess rules, analysis, opening data, puzzles, studies, profiles, settings, games, tournaments, teams, broadcasts, chat, explorer, engine integration, board editor, coordinates, practice, offline play, and other appropriate modules where legally permitted. Do not blindly copy the entire project. Preserve required copyright notices and license information. Maintain a complete third-party dependency and asset license inventory. If GPL-3.0-or-later code is used, comply with GPL requirements and provide corresponding source and notices as required. Do not copy proprietary Chess.com code or assets.
+3. PRODUCT SCOPE
+   ChessHub must combine a complete offline chess application, ChessHub-native online chess platform, bots, variants, analysis, game review, opening explorer, opening book, book moves, puzzles, lessons, studies, endgame training, tournaments, clubs, teams, broadcasts, social features, player profiles, statistics, achievements, country/federation systems, customization, PGN/FEN tools, and integrations with external services where officially supported.
+4. HOME
+   Create a clean home screen with Play, Quick Game, Bot, Puzzle, Learn, Analysis, Explorer, Studies, Watch, Profile and More. Show active game, daily puzzle, recent games, recommended lesson, upcoming tournament, saved analysis and optional friend activity. Allow cards to be hidden/reordered. Keep the interface lightweight.
+5. PLAY CHESS
+   Support standard chess with complete FIDE rules: legal moves, check, checkmate, stalemate, castling, en passant, promotion, underpromotion, insufficient material, threefold repetition, fivefold repetition where applicable, 50-move rule, 75-move rule where applicable, draw by agreement, resignation, timeout, illegal move prevention, game termination, PGN generation and complete move history. Support White/Black/random color, rated/unrated, casual/rated, custom time controls, increment, delay, unlimited time, correspondence and over-the-board local play.
+6. CHESSBOARD
+   The board is the highest-priority UI component. It must always remain fully visible, unobstructed and responsive. No popup, bottom sheet, banner, evaluation panel or overlay may cover important board squares during normal play. Support tap-to-move, drag-to-move, legal-move highlights, last-move highlight, check highlight, premove, move animation, board flip, coordinates, arrows, circles, square highlights, touch feedback, promotion dialog and accessibility-friendly board interaction. Never lose a move because of UI lag or a delayed gesture.
+7. PREMOVE
+   Implement reliable premove. Support multiple premoves where appropriate, premove cancellation, clear premoves, configurable premove behavior and safe handling when the position changes.
+8. GAME CLOCK
+   Implement accurate chess clocks with Fischer increment, Bronstein delay, simple delay, correspondence time, unlimited mode, pause where allowed, timeout detection, reconnect handling, server-authoritative online clocks and local clock support. Never allow client-side clock manipulation to determine an online result.
+9. ONLINE CHESSHUB
+   Build a real ChessHub backend for ChessHub-native online games. Include registration/login, authentication, profiles, matchmaking, lobby, challenge links, friend challenges, rated/unrated games, rematch, spectators, reconnect, game recovery, server clocks, resign, draw offer, draw claim, takeback request where allowed, abort/cancel rules, timeout, disconnect handling, game archive, ratings and rating history. Use WebSocket/realtime communication efficiently. Server validates every move and game result.
+10. MATCHMAKING
+    Support quick pairing by time control, rating range, variant, rated/unrated and optional region-independent preferences. Prevent unfair rating manipulation. Handle provisional ratings and rating changes.
+11. GAME CHAT
+    Provide optional game chat, spectator chat and moderation controls. Include mute, block, report, spam protection and safe filtering. Allow users to disable chat.
+12. BOT SYSTEM
+    Create a strong bot architecture using Stockfish and suitable lightweight engines/models. Support configurable bot ratings approximately 200-3200 ELO where engine strength permits. Add bot personalities, opening preferences, tactical style, positional style, aggression, time management, randomization and difficulty. Include themed bots with original ChessHub identities. Support bot challenge, rematch, takeback/undo where configured, hints in casual practice, and no-assistance fair-play modes.
+13. BOT RATING
+    Do not fake ELO. Bot rating should represent configured approximate playing strength and be clearly labeled as a bot rating. Online player ratings and bot ratings must be separate.
+14. CHESS VARIANTS
+    Support Standard Chess, Chess960, Three-Check, King of the Hill, Antichess, Atomic, Horde, Racing Kings and Crazyhouse if technically supported. Include variant-specific rules, legal move generation, promotion behavior, check rules and win conditions. Make variants modular so unsupported variants can be added later.
+15. CHESS960
+    Implement correct Chess960 starting-position generation, castling rules, position notation and legal move validation.
+16. CUSTOM BOARD EDITOR
+    Create a powerful board editor. Place/remove pieces, choose side to move, castling rights, en-passant square, halfmove/fullmove counters, load FEN, copy FEN, validate position, clear board, reset board, analyze position, play from position and export/import position.
+17. ANALYSIS BOARD
+    Provide a full analysis board with Stockfish. Include evaluation bar, depth, nodes, engine speed where available, best move, multiple principal variations, move list, variations, annotations, arrows, circles, comments, FEN, PGN, copy/share, board flip and engine settings. Analysis must run asynchronously and never freeze the UI.
+18. ENGINE
+    Integrate Stockfish or another appropriately licensed chess engine. Support configurable depth/time, threads and hash within device limits. Use background isolates/processes. Automatically stop the engine when leaving analysis. Never keep the engine running unnecessarily.
+19. EVALUATION
+    Show numerical evaluation, mate scores, evaluation bar, best move arrow and optional threat arrow. Make evaluation orientation clear for White and Black. Allow users to turn these features on/off.
+20. ENGINE MULTI-PV
+    Support 1, 2, 3 or more principal variations where device performance allows. Low-memory mode should reduce this automatically.
+21. MOVE FEEDBACK
+    During analysis or training, classify moves as best, excellent, good, book, inaccuracy, mistake, blunder, brilliant or similar categories only when supported by a defensible evaluation algorithm. Never fabricate labels.
+22. GAME REVIEW
+    Create a complete Game Review system. Analyze the entire game, identify inaccuracies, mistakes, blunders, missed wins, tactical opportunities, opening accuracy, middlegame accuracy, endgame accuracy, best move, critical moments and major turning points. Provide an evaluation graph and move-by-move review. Include a simple explanation of why a move was inaccurate. Allow users to jump directly to critical moments.
+23. REVIEW MODES
+    Provide quick review, detailed review and move-by-move analysis. Include “learn from my mistakes” mode that turns mistakes into training positions.
+24. OPENING RECOGNITION
+    Recognize openings from the move sequence. Display opening name, variation, ECO code and confidence where available. Do not invent opening names.
+25. OPENING BOOK
+    Implement a local opening book using properly licensed/open data from the supplied source or other permitted data. Show book moves, popularity, win/draw/loss statistics where available, master-game frequency and move recommendations. Clearly distinguish book recommendations from engine recommendations.
+26. BOOK MOVE
+    During a game against a bot or in analysis, optionally show whether the current move is an opening-book move. Allow book mode, engine mode or combined mode.
+27. OPENING EXPLORER
+    Create a powerful explorer with position statistics, move frequency, win/draw/loss percentages, master games, player games, rating filters, time-control filters, date filters and opening filters where data exists. Support global explorer, personal explorer and current-position explorer.
+28. MASTER GAME DATABASE
+    Support importing and browsing master games where legally available. Search by player, event, year, opening, ECO, result and position. Do not bundle massive databases into RAM or APK unnecessarily.
+29. ENDGAME
+    Provide endgame trainer, basic endgame lessons, tactical endgames and tablebase integration. Support tablebase queries where legally and technically available. Do not bundle huge tablebase files into the APK.
+30. PUZZLES
+    Create a full puzzle system with daily puzzle, random puzzle, puzzle themes, puzzle rating, puzzle history, puzzle dashboard, puzzle streak, puzzle storm, puzzle racer, timed puzzles, custom puzzles, tactical positions from user games, puzzle battle and survival modes where backend support exists. Include hints, retry rules, rating changes and performance statistics.
+31. PUZZLE THEMES
+    Include themes such as mate, fork, pin, skewer, discovered attack, double attack, deflection, sacrifice, attraction, interference, promotion, endgame, opening, defensive move and other tactical motifs. Add searchable themes and difficulty filtering.
+32. LEARNING
+    Create a structured learning path: Beginner, Intermediate, Advanced. Include chess basics, rules, piece movement, check/checkmate, tactics, strategy, openings, middlegames, endgames, calculation, positional concepts and practical game skills. Track progress and recommend the next lesson.
+33. LESSONS
+    Support interactive lessons with board positions, explanations, examples, quizzes, variations, hints and practice positions. Allow downloaded lessons for offline use.
+34. DRILLS
+    Provide tactical drills, opening drills, endgame drills, calculation drills, checkmate drills and coordinate drills.
+35. COORDINATE TRAINER
+    Add chessboard coordinate training with configurable difficulty, orientation, timer and statistics.
+36. STUDIES
+    Create ChessHub Studies with chapters, positions, variations, annotations, comments, arrows, circles, text, engine analysis, puzzles, lessons, imported games and PGN export/import. Support public, private and shared studies. Allow collaboration with invited users where backend support exists. Include chapter navigation, variation management and study search.
+37. GAME COLLECTIONS
+    Allow users to save games and positions into collections/folders. Add tags, notes, favorites and custom labels.
+38. PGN
+    Support PGN import from text/file/share intent, PGN export, copy PGN, annotated PGN, multi-game PGN, study PGN, game sharing and validation.
+39. FEN
+    Support FEN import/export, share FEN, open FEN in analysis, board editor and puzzle creation.
+40. GAME ARCHIVE
+    Provide searchable game history with filters for opponent, result, color, rating, time control, variant, opening, date and tournament. Support favorite, note, tag, analyze, review, export, share and delete.
+41. PROFILE
+    Create detailed profiles with avatar, username, bio, ratings, rating history, games, puzzle rating, puzzle statistics, achievements, best games, opening statistics, time-control performance, variant ratings, study count, tournament results, followers/friends and activity.
+42. COUNTRY SYSTEM
+    Include a searchable selector containing all supported countries/territories with flags. Store country separately from FIDE federation. Include ISO code, country name, flag, FIDE federation where applicable, profile display, country leaderboards, country statistics and federation filtering. Never infer country from precise location.
+43. FRIENDS
+    Support friend requests, accept/decline, friends list, online status where permission allows, challenge friend, follow/unfollow, block and remove.
+44. MESSAGING
+    Provide private messaging with block/report/mute, notification settings, spam limits and privacy controls.
+45. SOCIAL FEED
+    Create an optional activity feed for games, achievements, tournaments, studies and other safe public activities. Allow users to disable it.
+46. CLUBS
+    Allow users to create/join clubs. Include club profile, members, roles, announcements, forum/chat, club tournaments, team battles, leaderboards and moderation.
+47. TEAMS
+    Support teams with members, roles, team profile, tournaments, team battles, chat/forum and statistics.
+48. TOURNAMENTS
+    Implement Arena tournaments, Swiss tournaments, scheduled tournaments, daily tournaments, rated/unrated tournaments, variant tournaments, team tournaments and simultaneous exhibitions where supported. Include registration/join, pairing, standings, points, streaks, tiebreaks, rounds, time controls, spectators, tournament chat, results and history.
+49. ARENA
+    Implement continuous pairing, tournament clock, scoring, streak bonuses where configured, leaderboard, remaining time and automatic next-game pairing.
+50. SWISS
+    Implement round-based pairings, standings, color balancing, round start/end, tiebreak logic and results.
+51. SIMULS
+    Allow a strong player/host to play multiple opponents simultaneously where backend infrastructure supports it.
+52. LEAGUES AND LEADERBOARDS
+    Support rating leaderboards, puzzle leaderboards, tournament leaderboards, country leaderboards, club leaderboards, weekly/monthly/all-time rankings and variant rankings.
+53. ACHIEVEMENTS
+    Create achievements, medals, badges and milestones for games, wins, streaks, puzzles, ratings, tournaments, studies, lessons, openings and other legitimate activity. Do not grant achievements through fake or client-generated stats.
+54. STATISTICS
+    Provide detailed statistics: wins/losses/draws, accuracy, average opponent rating, time-control performance, opening performance, color performance, game phase performance, tactical mistakes, blunders, puzzle accuracy, puzzle themes, rating progress and activity trends.
+55. INSIGHTS
+    Add chess insights based on the user's own games. Show recurring weaknesses, strong openings, weak openings, tactical patterns, time-management problems, phase performance and improvement areas. Clearly label statistical conclusions as insights, not medical or psychological judgments.
+56. WATCH
+    Create Watch with live games, featured games, broadcasts, tournaments, streamers, current games, game replay and ChessTV-style automatic game selection where supported.
+57. BROADCASTS
+    Support live broadcast events with event information, rounds, boards, game navigation, standings, commentary where available, engine analysis where allowed, notifications and replay.
+58. MASTER EVENTS
+    Allow browsing of major chess events, players, rounds and games when data sources legally permit.
+59. SEARCH
+    Global search for users, games, studies, tournaments, clubs, teams, openings and broadcasts. Use pagination and indexed queries.
+60. NOTIFICATIONS
+    Support game challenge, friend request, tournament, broadcast, message, study, club and other relevant notifications. Provide granular notification settings.
+61. CUSTOMIZATION
+    Support light/dark themes, board themes, piece sets, coordinates, sounds, move animation, background, font size, board size, evaluation bar, notation preferences, vibration, confirmation before moves, auto-queen, move highlight and low-animation mode.
+62. ACCESSIBILITY
+    Support screen readers, large text, high contrast options, color-safe highlights, accessible move lists, keyboard/external input where available, blind-friendly move descriptions and reduced animation.
+63. MULTI-LANGUAGE
+    Build localization architecture. Start with English and Bengali, but make translation files expandable to many languages. Never hard-code user-facing text unnecessarily.
+64. OFFLINE-FIRST
+    Without internet, the user must still be able to play local chess, Chess960, custom positions, bots where engine is available, puzzles downloaded locally, lessons downloaded locally, opening book subset, PGN/FEN tools, game archive, board editor, themes, local statistics, endgame training and local analysis. Clearly show offline status. Never pretend an online action succeeded.
+65. CONNECTIVITY
+    Handle poor networks gracefully. Use retry with limits, reconnect, request cancellation, caching, offline queues where safe and clear error messages. Never create infinite reconnect loops.
+66. EXTERNAL LICHESS INTEGRATION
+    Where official Lichess APIs/authentication permit, support login/OAuth, importing games, profile information, studies or other permitted data. Respect rate limits and API terms. Do not scrape private endpoints. Do not pretend ChessHub is Lichess.
+67. CHESS.COM INTEGRATION
+    Use only officially supported/public APIs. Support public profile/game/statistics/import features where available. Do not claim the Chess.com public API can control live Chess.com games. Provide ChessHub-native alternatives for unsupported functionality.
+68. SHARING
+    Support share links for ChessHub games, positions, studies, puzzles, tournaments and profiles. Support Android share intents for PGN/FEN.
+69. FAIR PLAY
+    For rated games, all important game state, moves, clocks, ratings and results must be validated server-side. Do not expose engine assistance, hints or analysis during rated games unless the game mode explicitly allows it. Detect suspicious behavior carefully and avoid automatic punishment based on weak evidence alone.
+70. SECURITY
+    Use secure authentication, encrypted transport, safe token storage, server authorization, input validation, rate limits, abuse protection, database rules, secure WebSockets, no hard-coded secrets, safe file handling and proper session expiry. Never store passwords in plain text.
+71. MODERATION
+    Implement report, block, mute, chat moderation, tournament moderation, club roles, admin tools, abuse reports and account restrictions. Protect younger users from unsafe interactions through appropriate privacy defaults.
+72. PRIVACY
+    Provide privacy settings for profile visibility, online status, friends, messages, games, studies, activity feed and statistics. Do not collect precise location. Provide data export/deletion workflows where applicable.
+73. LOW-RAM OPTIMIZATION
+    Android 8.1/API 27 compatibility is mandatory. Target devices may have approximately 1 GB RAM. Use lazy loading, pagination, compact databases, limited image caching, small default assets, optional downloads, engine thread/hash limits, lifecycle cleanup, background processing, low animation and resource disposal. Do not preload huge databases. Do not keep engines or WebSockets running unnecessarily.
+74. LOW MEMORY MODE
+    Automatically reduce engine depth, engine threads, hash size, multi-PV count, animation, large images, sounds, preloaded history and other expensive resources. Allow manual control.
+75. PERFORMANCE
+    The board must remain responsive. Avoid blocking the UI isolate. Use isolates/background workers for engine analysis and expensive processing. Profile memory, CPU, frame rate, startup time and battery use.
+76. DATABASE
+    Use efficient local storage such as SQLite where appropriate. Index games, moves, players, studies, puzzles and settings. Use migrations. Prevent database corruption. Do not load entire tables into memory.
+77. ERROR HANDLING
+    Every network/database/engine/file operation must have loading, success, empty, offline and error states. Never leave a spinner forever. Never display fake successful data.
+78. UI QUALITY
+    Use a modern, clean, professional chess interface. Keep navigation simple. Avoid excessive cards and decorative elements. Use consistent spacing, typography, icons and interaction patterns. Do not copy Lichess or Chess.com pixel-for-pixel.
+79. GAME RESULT SCREEN
+    After a game show clear result: White win, Black win, Draw, Resignation, Checkmate, Timeout, Agreement, Stalemate or other correct reason. Show rating change for rated ChessHub games. Provide Review, Analysis, Rematch, New Game, Share and Archive.
+80. REPLAY
+    Provide smooth replay with previous/next move, first/last move, autoplay, speed control, board flip, move list, variations and annotations.
+81. TRAINING FROM GAMES
+    Convert blunders/mistakes from the user's own games into training positions. Allow retry and compare with engine analysis.
+82. OPENING TRAINER
+    Create opening practice from book lines. Let users practice both sides, randomize positions, show mistakes and track opening accuracy.
+83. ENDGAME TRAINER
+    Provide king+pawn, rook, queen, minor-piece and practical endgame exercises. Add interactive objectives and evaluation.
+84. CHESS COACH
+    Create an optional coach system that gives short, understandable explanations. Coach text must be generated from actual position/evaluation data, not invented moves or claims.
+85. DAILY SYSTEM
+    Daily puzzle, daily training, daily challenge and optional streak system. Never punish users for missing days unless they explicitly enable streak rules.
+86. PUZZLE DASHBOARD
+    Show puzzle rating, accuracy, solved count, average time, strongest themes, weakest themes and progress charts.
+87. GAME REVIEW CHART
+    Display evaluation graph, phase accuracy, critical moments, mistakes, blunders and best moves. Allow tapping graph points to jump to positions.
+88. ENGINE THREATS
+    Optional threat arrow and “what is the opponent threatening?” explanation. Only show when engine calculation supports it.
+89. ANNOTATIONS
+    Support NAG-style annotations where appropriate: brilliant, excellent, good, inaccuracy, mistake, blunder, forced, best, book and custom notes. Do not use labels as decoration without calculation support.
+90. VARIATION TREE
+    Analysis and studies must support multiple variations from the same position, nested variations, comments, arrows and navigation between branches.
+91. STUDY COLLABORATION
+    Allow study owners to invite collaborators with viewer/editor permissions. Support chapter creation, editing, comments, version-safe saving and access control.
+92. IMPORT TOOLS
+    Import PGN, FEN and supported game links. Validate imported data. Report malformed PGN/FEN instead of silently changing it.
+93. EXPORT TOOLS
+    Export PGN, FEN and selected study/game collections. Support Android sharing.
+94. BOARD THEMES
+    Include multiple lightweight board themes and piece sets. Allow custom board colors without affecting move visibility or accessibility.
+95. SOUND
+    Move, capture, check, castle, promotion and game-end sounds. Keep sound optional and lightweight. Provide mute and volume controls.
+96. HAPTICS
+    Optional light haptic feedback for moves, captures, errors and game end. Disable automatically in low-power/low-memory conditions if necessary.
+97. NOTATION
+    Support algebraic notation, move numbers, variations, comments and optional coordinate notation. Make notation readable on small screens.
+98. GAME SEARCH
+    Search by player, event, date, opening, result, rating, variant, tournament, position and tags.
+99. PROFILE GAME FILTERS
+    Allow filtering by time control, color, result, opponent rating, variant, opening and date.
+100. BOT OPENING SYSTEM
+     Allow bot opening books and personality preferences. Support random book choices while preserving legal and sensible play.
+101. BOT TRAINING
+     Allow “play from position”, “practice this mistake”, “play opening line” and “endgame practice”.
+102. ONLINE SAFETY
+     Default chat/privacy settings should be conservative. Include block/report controls and prevent unwanted contact from users who are not permitted to message the account.
+103. ADMIN DASHBOARD
+     For ChessHub administrators, provide user management, reports, tournament moderation, club moderation, system health, feature flags, abuse controls and audit logs. Never expose admin tools to normal users.
+104. BACKEND
+     Design a scalable backend with authentication, users, games, moves, clocks, matchmaking, ratings, tournaments, puzzles, studies, clubs, teams, messaging, notifications and moderation. Keep server authority for online game state.
+105. RATINGS
+     Implement a documented rating system such as Glicko-2 or another appropriate system. Store rating, deviation/provisional state and rating history. Do not mix ratings across variants/time controls unless intentionally designed.
+106. RATING PROTECTION
+     Prevent duplicate results, replayed moves, forged clocks, client-side result submission and rating manipulation.
+107. GAME STATE
+     Persist online games safely so users can reconnect after network failure or app restart. Restore the exact board, clocks and move sequence from server state.
+108. TOURNAMENT STATE
+     Persist pairings, scores, standings, rounds and results server-side.
+109. BROADCAST STATE
+     Use efficient event/game updates. Do not continuously poll unnecessarily.
+110. FEATURE FLAGS
+     Use feature flags for incomplete backend-dependent features. A disabled feature must be visibly labeled or hidden, not presented as working.
+111. NO FAKE FEATURES
+     No fake buttons, fake statistics, fake ratings, fake online users, fake tournament standings, fake engine analysis, fake API responses or fabricated content. Every visible feature must be functional or clearly marked as unavailable/coming later.
+112. TESTING
+     Create unit tests for chess rules, legal moves, special moves, variants, FEN, PGN, clocks, ratings, puzzles, opening recognition and game termination. Create widget tests for board interactions, promotion, navigation, analysis, review and settings. Create integration tests for login, online game, reconnect, game completion, tournament pairing, study saving and data import/export.
+113. CHESS RULE TEST SUITE
+     Test castling rights, en passant, promotion, check, checkmate, stalemate, repetition, 50/75-move rules, insufficient material, FEN loading, PGN replay, variant rules and illegal moves.
+114. BOARD TOUCH TESTS
+     Test tap-to-move, drag-to-move, rapid moves, promotion selection, board flip, premove, arrows and board interaction while engine analysis is running. The board must never become unresponsive.
+115. ANDROID TESTING
+     Test Android 8.1/API 27, especially on approximately 1 GB RAM hardware. Also test modern Android versions. Check startup, memory, scrolling, board responsiveness, engine stability, offline behavior and battery use.
+116. CI/CD
+     Provide reproducible builds, automated tests, static analysis, formatting, dependency checks, license checks and APK/AAB build pipelines. Keep signing secrets outside source control.
+117. PROJECT DOCUMENTATION
+     Create README, architecture documentation, setup instructions, environment configuration, backend setup, API documentation, database schema documentation, testing instructions, release instructions and license/attribution documentation.
+118. LICENSE AUDIT
+     Create THIRD_PARTY_NOTICES.md, THIRD_PARTY_LICENSES/, dependency inventory, source URL inventory, asset attribution inventory and Lichess-derived file inventory. Do not assume all files in the Lichess archive share one license.
+119. ABOUT
+     About ChessHub must contain the actual app version/build number, open-source licenses, third-party attributions, Lichess attribution if applicable, privacy policy, terms/community rules and a clear statement that ChessHub is independent from Lichess and Chess.com.
+120. RELEASE
+     Generate debug APK, release APK/AAB where configured, test results and a feature-status report. Never claim an APK is production-ready if tests or required backend components are missing.
+121. FEATURE STATUS
+     Maintain a status matrix with COMPLETE, PARTIAL, BLOCKED BY API, BLOCKED BY LICENSE, BACKEND REQUIRED, NOT IMPLEMENTED or TESTING. Never mark a feature COMPLETE until its core flow works and tests pass.
+122. IMPLEMENTATION ORDER
+     PHASE 1: New Flutter foundation, navigation, theme, chess rules, board, local game, PGN/FEN, settings.
+     PHASE 2: Stockfish, analysis board, opening book, opening recognition, explorer, review, endgame.
+     PHASE 3: Bots, puzzles, lessons, drills, coordinate trainer, offline systems.
+     PHASE 4: Profiles, authentication, ChessHub backend, online games, ratings, matchmaking, friends and chat.
+     PHASE 5: Studies, collections, clubs, teams, tournaments, Arena, Swiss, simul.
+     PHASE 6: Broadcasts, Watch, leaderboards, achievements, insights and social features.
+     PHASE 7: Lichess/Chess.com official integrations, imports, sharing and external data.
+     PHASE 8: Security, moderation, accessibility, localization, performance, Android 8.1 testing, license audit and release.
+123. IMPORTANT SOURCE LIMITATIONS
+     Do not assume the uploaded Lichess Mobile source contains the Lichess server. Do not assume it contains all live databases or backend infrastructure. Build missing ChessHub-native services separately. Use official external APIs only where permitted.
+124. CURRENT FEATURE PARITY TARGET
+     Use the supplied Lichess source plus the current public Lichess feature set as a parity checklist. The target includes Arena, Swiss, simuls, correspondence with conditional premoves, variants, Stockfish analysis, cloud analysis where available, game review, studies, insights, lessons, tactical puzzles, Puzzle Streak, Puzzle Storm, Puzzle Racer, opening explorers, personal explorer, endgame tablebase access, PGN import/export, teams, forums, blogs, TV, broadcasts, messaging, friends, challenges, custom boards/pieces/backgrounds and localization.
+125. ADDITIONAL MODERN FEATURES
+     Include notification subscriptions for broadcasts/events, FIDE player/event notifications where supported, deep links to games/profiles/TV, PGN/FEN sharing, imported-game opening, configurable home time controls, study sorting, puzzle theme search, offline play/practice and game-phase analysis. Treat these as optional modules if backend/API limitations apply.
+126. DESIGN PRINCIPLE
+     ChessHub should feel like one coherent application, not a collection of copied features. Prioritize speed, reliability, clarity and chess usability over visual complexity.
+127. FINAL NON-NEGOTIABLE REQUIREMENTS
+128. Build ChessHub NEW from scratch.
+129. Do not use the old broken ChessHub app as the foundation.
+130. Inspect and intelligently use the uploaded Lichess Mobile v0.30.3 source.
+131. Respect GPL and every third-party license.
+132. Do not copy proprietary Chess.com code/assets.
+133. Do not scrape private services.
+134. Use official APIs.
+135. Build ChessHub-native backend features where external APIs cannot provide them.
+136. Android 8.1/API 27 compatibility is mandatory.
+137. Optimize for approximately 1 GB RAM.
+138. The chessboard must always be fully visible and responsive.
+139. Analysis must never freeze the UI.
+140. No fake buttons or fake data.
+141. No fabricated engine analysis.
+142. No forged online results or client-authoritative clocks.
+143. Protect user privacy and provide moderation tools.
+144. Include country flags and separate FIDE federation selection.
+145. Include standard chess plus supported variants.
+146. Include bots, opening book, book moves, opening recognition, explorer, analysis and game review.
+147. Include puzzles, puzzle modes, lessons, studies and endgame training.
+148. Include online games, matchmaking, ratings, friends, chat, tournaments, clubs and teams.
+149. Include broadcasts and Watch.
+150. Include profiles, achievements, statistics and insights.
+151. Include PGN/FEN import/export.
+152. Include offline functionality.
+153. Test every major feature.
+154. Keep a real feature-status report.
+155. Build an actual APK/AAB only after verification.
+     FINAL PRODUCT:
+     ChessHub is an independent, complete chess ecosystem combining a powerful offline chess app, ChessHub online platform, bots, chess variants, Stockfish analysis, game review, opening books, book moves, opening explorer, master games, puzzles, lessons, studies, endgame training, tournaments, clubs, teams, broadcasts, social features, profiles, achievements, statistics, country/federation systems, PGN/FEN tools, customization, official external integrations and strong low-memory optimization. The application must be functional, secure, legally compliant, original in design and genuinely usable on Android 8.1 devices with limited RAM.
+     DO NOT STOP AT A UI MOCKUP. IMPLEMENT THE REAL FEATURES, CONNECT THE REQUIRED SERVICES, TEST THEM, BUILD THE APPLICATION, AND REPORT EXACTLY WHAT WORKS.
+     END OF CHESSHUB ULTIMATE MASTER PROMPT
