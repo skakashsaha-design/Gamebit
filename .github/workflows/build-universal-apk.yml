@@ -13,26 +13,27 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
-      HAS_RELEASE_SIGNING:
-        ${{ secrets.KEYSTORE_BASE64 != '' && secrets.STORE_PASSWORD != '' && secrets.KEY_PASSWORD != '' }}
+      HAS_RELEASE_SIGNING: ${{ secrets.KEYSTORE_BASE64 != '' && secrets.STORE_PASSWORD != '' && secrets.KEY_PASSWORD != '' }}
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Set up JDK 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
+          cache: gradle
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: '9.3.1'
+      - name: Make Gradle wrapper executable
+        run: chmod +x ./gradlew
+
+      - name: Verify Gradle wrapper
+        run: ./gradlew --version
 
       - name: Ensure Secrets plugin placeholder .env exists
         run: |
@@ -55,15 +56,15 @@ jobs:
           fi
 
       - name: Run Unit & Robolectric Tests
-        run: gradle :app:testDebugUnitTest
+        run: ./gradlew :app:testDebugUnitTest
 
       - name: Run Android Lint
-        run: gradle :app:lintDebug
+        run: ./gradlew :app:lintDebug
 
-      - name: Build Universal Debug APK (all ABIs, no splits)
-        run: gradle :app:assembleDebug
+      - name: Build Universal Debug APK
+        run: ./gradlew :app:assembleDebug
 
-      - name: Build Universal Release APK (when upload keystore secrets are configured)
+      - name: Build Universal Release APK
         if: env.HAS_RELEASE_SIGNING == 'true'
         env:
           STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
@@ -71,7 +72,7 @@ jobs:
           KEYSTORE_PATH: ${{ github.workspace }}/my-upload-key.jks
         run: |
           echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 --decode > "$KEYSTORE_PATH"
-          gradle :app:assembleRelease
+          ./gradlew :app:assembleRelease
           rm -f "$KEYSTORE_PATH"
 
       - name: Rename and verify Universal APK output
@@ -86,6 +87,7 @@ jobs:
               dist/ChessHub-universal-release.apk
           fi
 
+          echo "APK files:"
           ls -lh dist/
 
       - name: Upload Universal APK Artifacts
@@ -104,3 +106,4 @@ jobs:
             app/build/reports/tests/testDebugUnitTest/
             app/build/reports/lint-results-debug.html
           retention-days: 14
+          if-no-files-found: warn
