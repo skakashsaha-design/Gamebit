@@ -1,15 +1,11 @@
-name: Build ChessHub Universal APK
+name: Diagnose ChessHub Kotlin Build
 
 on:
-  push:
-    branches: [ main, master ]
-  pull_request:
-    branches: [ main, master ]
   workflow_dispatch:
 
 jobs:
-  build:
-    name: Test, Lint & Build ChessHub APK
+  diagnose:
+    name: Diagnose Kotlin Compilation
     runs-on: ubuntu-latest
 
     steps:
@@ -28,22 +24,10 @@ jobs:
         with:
           packages: 'platform-tools'
 
-      - name: Check Android SDK
-        run: |
-          echo "ANDROID_HOME=$ANDROID_HOME"
-          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
-          sdkmanager --version
-          adb version
-
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '9.3.1'
-
-      - name: Check Gradle
-        run: |
-          java -version
-          gradle --version
 
       - name: Create debug keystore
         run: |
@@ -59,40 +43,9 @@ jobs:
               -dname "CN=Android Debug,O=Android,C=US"
           fi
 
-      - name: Run Unit Tests
-        run: gradle :app:testDebugUnitTest
-
-      - name: Run Android Lint
-        run: gradle :app:lintDebug
-
-      - name: Build Debug APK
-        run: gradle :app:assembleDebug
-
-      - name: Prepare APK
+      - name: Compile Kotlin
         run: |
-          mkdir -p dist
-
-          cp app/build/outputs/apk/debug/app-debug.apk \
-            dist/ChessHub-universal-debug.apk
-
-          echo "APK successfully created:"
-          ls -lh dist/
-
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: ChessHub-Universal-APK
-          path: dist/*.apk
-          retention-days: 30
-          if-no-files-found: error
-
-      - name: Upload Test and Lint Reports
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: ChessHub-Reports
-          path: |
-            app/build/reports/tests/testDebugUnitTest/
-            app/build/reports/lint-results-debug.html
-          retention-days: 14
-          if-no-files-found: warn
+          gradle :app:compileDebugKotlin \
+            --stacktrace \
+            --info \
+            --console=plain
