@@ -7,7 +7,10 @@ import com.example.chess.BookMoveStat
 import com.example.chess.ChessBoardState
 import com.example.chess.ChessEngine
 import com.example.chess.ChessVariant
+import com.example.chess.EndgameClassification
+import com.example.chess.EndgameClassifier
 import com.example.chess.EngineLine
+import com.example.chess.GambitMatch
 import com.example.chess.GameReviewReport
 import com.example.chess.Move
 import com.example.chess.MoveGenerator
@@ -15,7 +18,10 @@ import com.example.chess.MoveNode
 import com.example.chess.OpeningBook
 import com.example.chess.OpeningMatch
 import com.example.chess.PgnParser
+import com.example.chess.Square
+import com.example.chess.UciChessEngine
 import com.example.data.local.AppSettings
+import com.example.data.local.ChessPuzzleEntity
 import com.example.data.local.CustomPuzzleEntity
 import com.example.data.local.LocalChessRepository
 import com.example.data.local.LocalGameEntity
@@ -46,6 +52,8 @@ data class AnalysisUiState(
     val externalExplorerLoading: Boolean = false,
     val tablebaseResult: ExternalTablebaseResult? = null,
     val openingMatch: OpeningMatch? = null,
+    val gambitMatch: GambitMatch? = null,
+    val endgameClassification: EndgameClassification? = null,
     val coachInsight: String = "",
     val isAutoPlaying: Boolean = false,
     val autoplaySpeedMs: Long = 900L,
@@ -54,6 +62,10 @@ data class AnalysisUiState(
     val statusBanner: String = "",
     val errorText: String? = null,
     val arrows: List<BoardArrow> = emptyList(),
+    val userArrows: List<BoardArrow> = emptyList(),
+    val userCircleSquares: Set<Square> = emptySet(),
+    val uciOutput: List<String> = emptyList(),
+    val uciRunning: Boolean = true,
 )
 
 class AnalysisAndReviewViewModel(
@@ -63,12 +75,23 @@ class AnalysisAndReviewViewModel(
     private val _uiState = MutableStateFlow(AnalysisUiState())
     val uiState: StateFlow<AnalysisUiState> = _uiState.asStateFlow()
 
+    private val uciEngine = UciChessEngine()
     private var engineJob: Job? = null
     private var autoplayJob: Job? = null
     private var currentSettings = AppSettings()
 
     init {
         refreshDerivedForNode(_uiState.value.rootNode)
+        viewModelScope.launch {
+            uciEngine.outputLog.collect { log ->
+                _uiState.update { it.copy(uciOutput = log) }
+            }
+        }
+        viewModelScope.launch {
+            uciEngine.isRunning.collect { running ->
+                _uiState.update { it.copy(uciRunning = running) }
+            }
+        }
     }
 
     fun updateSettings(settings: AppSettings) {
@@ -87,6 +110,84 @@ class AnalysisAndReviewViewModel(
         val next = !_uiState.value.engineEnabled
         _uiState.update { it.copy(engineEnabled = next) }
         if (next) startEngineForCurrentNode() else stopEngine()
+    }
+
+    fun runUciCommand(command: String) {
+        viewModelScope.launch {
+            uciEngine.sendCommand(command)
+        }
+    }
+
+    fun runUciBenchmarkHere() {
+        viewModelScope.launch {
+            uciEngine.sendCommand("uci")
+            uciEngine.sendCommand("setoption name MultiPV value ${currentSettings.engineMultiPv}")
+            uciEngine.sendCommand("position fen ${_uiState.value.currentNode.state.toFen()}")
+            uciEngine.sendCommand("go depth ${currentSettings.engineDepth.coerceIn(1, 4)}")
+        }
+    }
+
+    fun restartUciEngine() {
+        uciEngine.restartEngine()
+        _uiState.update { it.copy(statusBanner = "UCI engine restarted") }
+    }
+
+    fun toggleUserCircle(square: Square) {
+        if (!currentSettings.allowBoardArrows) return
+        _uiState.update { st ->
+            val next = if (square in st.userCircleSquares) st.userCircleSquares - square else st.userCircleSquares + square
+            st.copy(userCircleSquares = next)
+        }
+    }
+
+    fun toggleUserArrow(from: Square, to: Square) {
+        if (!currentSettings.allowBoardArrows || from == to) return
+        _uiState.update { st ->
+            val exists = st.userArrows.any { it.from == from && it.to == to }
+            val next = if (exists) {
+                st.userArrows.filterNot { it.from == from && it.to == to }
+            } else {
+                st.userArrows + BoardArrow(from, to, 0xCC3B82F6)
+            }
+            st.copy(userArrows = next)
+        }
+    }
+
+    fun clearUserAnnotations() {
+        _uiState.update { it.copy(userArrows = emptyList(), userCircleSquares = emptySet()) }
+    }
+
+    fun saveCurrentPositionAsPuzzle(
+        title: String,
+        solutionMoveUci: String,
+        theme: String,
+        rating: Int,
+        hint: String = "Find the best tactical move from this position.",
+    ) {
+        val state = _uiState.value.currentNode.state
+        val fen = state.toFen()
+        val sol = solutionMoveUci.trim().ifBlank {
+            _uiState.value.engineLines.firstOrNull()?.pvMoves?.firstOrNull()?.uci ?: ""
+        }
+        if (sol.isBlank()) {
+            _uiState.update { it.copy(errorText = "Provide a solution move or run Engine to auto-fill Best Move.") }
+            return
+        }
+        viewModelScope.launch {
+            val puzzle = ChessPuzzleEntity(
+                id = "custom_${UUID.randomUUID().toString().take(12)}",
+                title = title.trim().ifBlank { "Custom Tactic" },
+                fen = fen,
+                solutionMoves = sol,
+                difficultyRating = rating.coerceIn(400, 3000),
+                themes = theme.ifBlank { "Custom" },
+                hint = hint,
+                explanation = "Created from Analysis / Board Editor ($sol).",
+                source = "custom",
+            )
+            localRepo.savePuzzle(puzzle)
+            _uiState.update { it.copy(statusBanner = "Saved '${puzzle.title}' to Room Puzzle Collection!") }
+        }
     }
 
     fun toggleFlip() {
@@ -181,6 +282,8 @@ class AnalysisAndReviewViewModel(
                         currentNode = root,
                         reviewReport = null,
                         errorText = null,
+                        userArrows = emptyList(),
+                        userCircleSquares = emptySet(),
                         statusBanner = "Loaded FEN position",
                     )
                 }
@@ -207,6 +310,8 @@ class AnalysisAndReviewViewModel(
                         currentNode = endNode,
                         reviewReport = null,
                         errorText = null,
+                        userArrows = emptyList(),
+                        userCircleSquares = emptySet(),
                         statusBanner = "Imported PGN (${games.size} game${if (games.size > 1) "s" else ""})",
                     )
                 }
@@ -241,7 +346,11 @@ class AnalysisAndReviewViewModel(
         viewModelScope.launch {
             _uiState.update { it.copy(isReviewing = true, errorText = null, statusBanner = "Analyzing ${mainMoves.size} moves...") }
             val engine = ChessEngine(currentSettings.lowMemoryMode)
-            val report = engine.reviewGame(_uiState.value.rootNode.state, mainMoves)
+            val report = engine.reviewGame(
+                initialState = _uiState.value.rootNode.state,
+                moves = mainMoves,
+                useOpeningBook = currentSettings.openingBookEnabled,
+            )
 
             // Attach evaluations and NAGs onto MoveNodes
             val nodes = _uiState.value.rootNode.mainLine()
@@ -338,10 +447,16 @@ class AnalysisAndReviewViewModel(
     private fun refreshDerivedForNode(node: MoveNode) {
         val path = node.pathFromRoot().drop(1)
         val ucis = path.mapNotNull { it.move?.uci }
-        val localBook = if (node.state.variant == ChessVariant.STANDARD) {
+        val localBook = if (node.state.variant == ChessVariant.STANDARD && currentSettings.openingBookEnabled) {
             OpeningBook.getLocalBookMoves(node.state, ucis)
         } else emptyList()
-        val opening = if (node.state.variant == ChessVariant.STANDARD) OpeningBook.recognize(ucis) else null
+        val opening = if (node.state.variant == ChessVariant.STANDARD && currentSettings.openingRecognitionEnabled) {
+            OpeningBook.recognize(ucis)
+        } else null
+        val gambit = if (node.state.variant == ChessVariant.STANDARD && currentSettings.gambitRecognitionEnabled) {
+            OpeningBook.recognizeGambit(ucis)
+        } else null
+        val endgame = if (currentSettings.endgameRecognitionEnabled) EndgameClassifier.classify(node.state) else null
         val coach = ChessEngine(currentSettings.lowMemoryMode).explainCurrentPosition(node.state, null)
         _uiState.update {
             it.copy(
@@ -349,8 +464,12 @@ class AnalysisAndReviewViewModel(
                 legalMoves = MoveGenerator.legalMoves(node.state),
                 localBookMoves = localBook,
                 openingMatch = opening,
+                gambitMatch = gambit,
+                endgameClassification = endgame,
                 coachInsight = coach,
                 tablebaseResult = null,
+                userArrows = emptyList(),
+                userCircleSquares = emptySet(),
             )
         }
     }
@@ -359,15 +478,20 @@ class AnalysisAndReviewViewModel(
         engineJob?.cancel()
         val state = _uiState.value.currentNode.state
         val engine = ChessEngine(currentSettings.lowMemoryMode)
+        val maxDepth = if (currentSettings.lowMemoryMode) currentSettings.engineDepth.coerceAtMost(3) else currentSettings.engineDepth.coerceIn(1, 5)
+        val multiPv = if (currentSettings.lowMemoryMode) 1 else currentSettings.engineMultiPv.coerceIn(1, 3)
+
         engineJob = viewModelScope.launch {
             engine.analyzeStream(
                 state = state,
-                maxDepth = if (currentSettings.lowMemoryMode) 3 else 4,
-                multiPv = if (currentSettings.lowMemoryMode) 1 else 3,
+                maxDepth = maxDepth,
+                multiPv = multiPv,
             ).collect { lines ->
                 val arrows = mutableListOf<BoardArrow>()
-                lines.firstOrNull()?.pvMoves?.firstOrNull()?.let { best ->
-                    arrows.add(BoardArrow(best.from, best.to, 0xCC10B981))
+                if (currentSettings.showBestMoveArrow) {
+                    lines.firstOrNull()?.pvMoves?.firstOrNull()?.let { best ->
+                        arrows.add(BoardArrow(best.from, best.to, 0xCC10B981))
+                    }
                 }
                 if (currentSettings.showThreatArrow) {
                     engine.computeOpponentThreat(state)?.let { threat ->
@@ -391,3 +515,4 @@ class AnalysisAndReviewViewModel(
         stopEngine()
     }
 }
+

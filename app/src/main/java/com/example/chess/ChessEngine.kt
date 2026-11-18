@@ -65,6 +65,7 @@ data class ReviewedMove(
     val quality: MoveQuality,
     val coachExplanation: String,
     val isCriticalMoment: Boolean,
+    val mistakeBreakdown: MistakeAnalysisBreakdown? = null,
 )
 
 data class GameReviewReport(
@@ -77,9 +78,13 @@ data class GameReviewReport(
     val whiteInaccuracies: Int,
     val whiteMistakes: Int,
     val whiteBlunders: Int,
+    val whiteMissedWins: Int = 0,
+    val whiteMissedMates: Int = 0,
     val blackInaccuracies: Int,
     val blackMistakes: Int,
     val blackBlunders: Int,
+    val blackMissedWins: Int = 0,
+    val blackMissedMates: Int = 0,
 )
 
 class ChessEngine(
@@ -233,6 +238,7 @@ class ChessEngine(
     suspend fun reviewGame(
         initialState: ChessBoardState,
         moves: List<Move>,
+        useOpeningBook: Boolean = true,
     ): GameReviewReport = withContext(Dispatchers.Default) {
         val reviewed = mutableListOf<ReviewedMove>()
         var current = initialState
@@ -252,18 +258,22 @@ class ChessEngine(
         var wInacc = 0
         var wMist = 0
         var wBlun = 0
+        var wMissedWin = 0
+        var wMissedMate = 0
         var bInacc = 0
         var bMist = 0
         var bBlun = 0
+        var bMissedWin = 0
+        var bMissedMate = 0
 
-        val evalDepth = if (lowMemoryMode) 2 else 2
+        val evalDepth = 2
 
         for ((idx, move) in moves.withIndex()) {
             currentCoroutineContext().ensureActive()
             val fenBefore = current.toFen()
             val san = MoveGenerator.toSan(current, move)
             val mover = current.sideToMove
-            val isBookMove = OpeningBook.getLocalBookMoves(current, uciHistory).any { it.uci == move.uci }
+            val isBookMove = useOpeningBook && OpeningBook.getLocalBookMoves(current, uciHistory).any { it.uci == move.uci }
 
             val bestLineBefore = evaluateBest(current, depth = evalDepth, timeLimitMs = 280L)
             val evalBeforeWhiteCp = bestLineBefore?.scoreCp ?: staticEvalWhite(current)
@@ -306,6 +316,13 @@ class ChessEngine(
                 else -> Unit
             }
 
+            // Detect missed mates & missed winning advantages
+            if (bestForMover >= 45_000 && afterForMover < 45_000) {
+                if (mover == PieceColor.WHITE) wMissedMate++ else bMissedMate++
+            } else if (bestForMover >= 250 && afterForMover < 100 && move.uci != bestMove.uci) {
+                if (mover == PieceColor.WHITE) wMissedWin++ else bMissedWin++
+            }
+
             val moveAccuracy = (103.1668 * exp(-0.04354 * cpLoss.coerceAtMost(600)) - 3.1669).coerceIn(0.0, 100.0)
             if (mover == PieceColor.WHITE) {
                 whiteAccSum += moveAccuracy
@@ -321,6 +338,18 @@ class ChessEngine(
                 pieceCount <= 12 -> { endSum += moveAccuracy; endCount++ }
                 else -> { midSum += moveAccuracy; midCount++ }
             }
+
+            val breakdown = MistakeAnalyzer.analyze(
+                stateBefore = current,
+                stateAfter = next,
+                movePlayed = move,
+                playedSan = san,
+                bestMoveSan = bestSan,
+                evalBeforeWhiteCp = evalBeforeWhiteCp,
+                evalAfterWhiteCp = evalAfterWhiteCp,
+                cpLoss = cpLoss,
+                quality = quality,
+            )
 
             val coachNote = buildCoachExplanation(
                 stateBefore = current,
@@ -346,6 +375,7 @@ class ChessEngine(
                     quality = quality,
                     coachExplanation = coachNote,
                     isCriticalMoment = quality == MoveQuality.BLUNDER || quality == MoveQuality.MISTAKE || quality == MoveQuality.BRILLIANT,
+                    mistakeBreakdown = breakdown,
                 )
             )
             uciHistory.add(move.uci)
@@ -362,9 +392,13 @@ class ChessEngine(
             whiteInaccuracies = wInacc,
             whiteMistakes = wMist,
             whiteBlunders = wBlun,
+            whiteMissedWins = wMissedWin,
+            whiteMissedMates = wMissedMate,
             blackInaccuracies = bInacc,
             blackMistakes = bMist,
             blackBlunders = bBlun,
+            blackMissedWins = bMissedWin,
+            blackMissedMates = bMissedMate,
         )
     }
 

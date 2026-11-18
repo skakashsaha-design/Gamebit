@@ -16,6 +16,7 @@ import com.example.data.remote.ClubDoc
 import com.example.data.remote.DirectMessageDoc
 import com.example.data.remote.ExternalBroadcastItem
 import com.example.data.remote.ExternalChessApis
+import com.example.data.remote.ExternalChessNewsItem
 import com.example.data.remote.ExternalPlayerSummary
 import com.example.data.remote.ExternalTvChannel
 import com.example.data.remote.FriendshipDoc
@@ -23,6 +24,7 @@ import com.example.data.remote.GameChatMessageDoc
 import com.example.data.remote.MessageThreadDoc
 import com.example.data.remote.OnlineGameDoc
 import com.example.data.remote.PublicProfileDoc
+import com.example.data.remote.RatingDeltaResult
 import com.example.data.remote.TeamDoc
 import com.example.data.remote.TournamentDoc
 import com.example.data.remote.TournamentEntryDoc
@@ -87,6 +89,15 @@ class OnlineViewModel(
 
     private val _externalPlayerSummary = MutableStateFlow<ExternalPlayerSummary?>(null)
     val externalPlayerSummary: StateFlow<ExternalPlayerSummary?> = _externalPlayerSummary.asStateFlow()
+
+    private val _playerSearchResults = MutableStateFlow<List<PublicProfileDoc>>(emptyList())
+    val playerSearchResults: StateFlow<List<PublicProfileDoc>> = _playerSearchResults.asStateFlow()
+
+    private val _lastRatingDelta = MutableStateFlow<RatingDeltaResult?>(null)
+    val lastRatingDelta: StateFlow<RatingDeltaResult?> = _lastRatingDelta.asStateFlow()
+
+    private val _chessNews = MutableStateFlow<List<ExternalChessNewsItem>>(emptyList())
+    val chessNews: StateFlow<List<ExternalChessNewsItem>> = _chessNews.asStateFlow()
 
     private val _adminReports = MutableStateFlow<List<AbuseReportDoc>>(emptyList())
     val adminReports: StateFlow<List<AbuseReportDoc>> = _adminReports.asStateFlow()
@@ -298,10 +309,12 @@ class OnlineViewModel(
         val doc = _activeGameDoc.value ?: return
         if (doc.status != "active") return
         val amWhite = doc.whiteUid == currentUserId
-        val winnerUid = if (amWhite) doc.blackUid else doc.whiteUid
+        val oppUid = if (amWhite) doc.blackUid else doc.whiteUid
+        val winnerUid = oppUid
         val res = if (amWhite) "0-1" else "1-0"
         val tcCategory = TimeControl(doc.timeControl, (doc.initialTimeMs / 1000).toInt(), (doc.incrementMs / 1000).toInt()).category
         viewModelScope.launch {
+            val oppRating = repo.fetchOpponentRating(oppUid, tcCategory)
             repo.finishOnlineGame(
                 gameId = doc.id,
                 status = "finished",
@@ -310,22 +323,39 @@ class OnlineViewModel(
                 winnerUid = winnerUid,
                 ratedGame = doc.ratedGame,
                 timeCategory = tcCategory,
-                opponentRating = 1500.0,
+                opponentRating = oppRating,
                 myScore = 0.0,
-            )
+            ).onSuccess { delta ->
+                _lastRatingDelta.value = delta
+            }
         }
     }
 
     fun offerOnlineDraw() {
         val doc = _activeGameDoc.value ?: return
+        val oppUid = if (doc.whiteUid == currentUserId) doc.blackUid else doc.whiteUid
         viewModelScope.launch {
             if (doc.drawOfferBy.isNotBlank() && doc.drawOfferBy != currentUserId) {
-                val tcCategory = TimeControl(doc.timeControl, (doc.initialTimeMs / 1000).toInt()).category
-                repo.finishOnlineGame(doc.id, "finished", "1/2-1/2", "Draw by Agreement", "", doc.ratedGame, tcCategory, 1500.0, 0.5)
+                val tcCategory = TimeControl(doc.timeControl, (doc.initialTimeMs / 1000).toInt(), (doc.incrementMs / 1000).toInt()).category
+                val oppRating = repo.fetchOpponentRating(oppUid, tcCategory)
+                repo.finishOnlineGame(doc.id, "finished", "1/2-1/2", "Draw by Agreement", "", doc.ratedGame, tcCategory, oppRating, 0.5)
+                    .onSuccess { delta -> _lastRatingDelta.value = delta }
             } else {
                 repo.offerDraw(doc.id)
                 _statusMessage.value = "Draw offer sent"
             }
+        }
+    }
+
+    fun clearLastRatingDelta() {
+        _lastRatingDelta.value = null
+    }
+
+    fun searchPlayers(query: String) {
+        viewModelScope.launch {
+            repo.searchPublicPlayers(query)
+                .onSuccess { _playerSearchResults.value = it }
+                .onFailure { _statusMessage.value = it.localizedMessage }
         }
     }
 
@@ -475,6 +505,7 @@ class OnlineViewModel(
         viewModelScope.launch {
             externalApis.fetchLichessBroadcasts().onSuccess { _broadcasts.value = it }
             externalApis.fetchLichessTvChannels().onSuccess { _tvChannels.value = it }
+            externalApis.fetchChessNews().onSuccess { _chessNews.value = it }
         }
     }
 

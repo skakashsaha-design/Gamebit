@@ -71,10 +71,13 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.example.chess.BoardArrow
+import com.example.chess.BotProfile
 import com.example.chess.ChessBoardState
 import com.example.chess.ChessHubBots
 import com.example.chess.ChessVariant
 import com.example.chess.ClockType
+import com.example.chess.Glicko2RatingSystem
+import com.example.chess.GlickoRating
 import com.example.chess.Move
 import com.example.chess.MoveGenerator
 import com.example.chess.Piece
@@ -84,6 +87,8 @@ import com.example.chess.TimeControl
 import com.example.data.local.AppSettings
 import com.example.data.remote.GameChatMessageDoc
 import com.example.data.remote.OnlineGameDoc
+import com.example.data.remote.PublicProfileDoc
+import com.example.data.remote.RatingDeltaResult
 import com.example.ui.components.ChessBoardView
 import com.example.ui.components.PieceMiniIcon
 import com.example.ui.theme.ChessBoardThemes
@@ -98,16 +103,20 @@ fun PlayScreen(
     settings: AppSettings,
     isOnline: Boolean,
     currentUserId: String?,
+    myProfile: PublicProfileDoc?,
     searchingTicketId: String?,
     activeOnlineGame: OnlineGameDoc?,
     onlineChatMessages: List<GameChatMessageDoc>,
+    onlineRatingDelta: RatingDeltaResult?,
     onLocalMove: (Move) -> Unit,
     onQueuePremove: (Move) -> Unit,
     onClearPremoves: () -> Unit,
     onConfirmMove: () -> Unit,
     onCancelConfirmMove: () -> Unit,
     onSelectDropPiece: (PieceType?) -> Unit,
-    onStartNewLocalGame: (PlayMode, ChessVariant, TimeControl, PieceColor, com.example.chess.BotProfile) -> Unit,
+    onStartNewLocalGame: (PlayMode, ChessVariant, TimeControl, PieceColor, BotProfile, BotProfile) -> Unit,
+    onToggleBotVsBotPause: () -> Unit,
+    onStepBotVsBotNext: () -> Unit,
     onToggleFlip: () -> Unit,
     onToggleClockPause: () -> Unit,
     onTakeback: () -> Unit,
@@ -140,7 +149,15 @@ fun PlayScreen(
             Tab(
                 selected = selectedModeTab == 0,
                 onClick = { selectedModeTab = 0 },
-                text = { Text(if (localState.mode == PlayMode.VS_BOT) "Play vs Bot" else "Pass & Play (OTB)") },
+                text = {
+                    Text(
+                        when (localState.mode) {
+                            PlayMode.VS_BOT -> "Play vs Bot"
+                            PlayMode.BOT_VS_BOT -> "Bot vs Bot"
+                            PlayMode.PASS_AND_PLAY -> "Pass & Play (OTB)"
+                        },
+                    )
+                },
                 modifier = Modifier.testTag("tab_local_play"),
             )
             Tab(
@@ -163,6 +180,8 @@ fun PlayScreen(
                 onCancelConfirmMove = onCancelConfirmMove,
                 onSelectDropPiece = onSelectDropPiece,
                 onOpenSetup = { showSetupSheet = true },
+                onToggleBotVsBotPause = onToggleBotVsBotPause,
+                onStepBotVsBotNext = onStepBotVsBotNext,
                 onToggleFlip = onToggleFlip,
                 onToggleClockPause = onToggleClockPause,
                 onTakeback = onTakeback,
@@ -176,6 +195,7 @@ fun PlayScreen(
                         localState.timeControl,
                         localState.humanColor,
                         localState.bot,
+                        localState.botBlack,
                     )
                 },
                 onAnalyzePgn = onAnalyzePgn,
@@ -185,11 +205,13 @@ fun PlayScreen(
             OnlinePlayContent(
                 isOnline = isOnline,
                 currentUserId = currentUserId,
+                myProfile = myProfile,
                 settings = settings,
                 boardTheme = boardTheme,
                 searchingTicketId = searchingTicketId,
                 activeGame = activeOnlineGame,
                 chatMessages = onlineChatMessages,
+                ratingDelta = onlineRatingDelta,
                 onStartMatchmaking = onStartMatchmaking,
                 onCancelMatchmaking = onCancelMatchmaking,
                 onOnlineMove = onOnlineMove,
@@ -207,9 +229,9 @@ fun PlayScreen(
         NewLocalGameBottomSheet(
             currentState = localState,
             onDismiss = { showSetupSheet = false },
-            onStart = { mode, variant, tc, color, bot ->
+            onStart = { mode, variant, tc, color, bot, botBlack ->
                 showSetupSheet = false
-                onStartNewLocalGame(mode, variant, tc, color, bot)
+                onStartNewLocalGame(mode, variant, tc, color, bot, botBlack)
             },
         )
     }
@@ -228,6 +250,8 @@ private fun LocalBoardContent(
     onCancelConfirmMove: () -> Unit,
     onSelectDropPiece: (PieceType?) -> Unit,
     onOpenSetup: () -> Unit,
+    onToggleBotVsBotPause: () -> Unit,
+    onStepBotVsBotNext: () -> Unit,
     onToggleFlip: () -> Unit,
     onToggleClockPause: () -> Unit,
     onTakeback: () -> Unit,
@@ -307,13 +331,17 @@ private fun LocalBoardContent(
                     theme = boardTheme,
                     modifier = Modifier.widthIn(max = 520.dp),
                     flipped = state.flipped,
-                    interactive = !state.gameStatus.isTerminal,
+                    interactive = !state.gameStatus.isTerminal && state.mode != PlayMode.BOT_VS_BOT,
                     allowBothSides = state.mode == PlayMode.PASS_AND_PLAY,
                     humanSide = state.humanColor,
                     showCoordinates = settings.showCoordinates,
                     showLegalMoves = settings.showLegalMoves,
                     showLastMove = settings.showLastMove,
                     autoQueen = settings.autoQueen,
+                    pieceStyleId = settings.pieceStyleId,
+                    moveAnimation = settings.moveAnimation,
+                    reducedAnimations = settings.reducedAnimations,
+                    animationSpeed = settings.animationSpeed,
                     lastMove = state.lastMove,
                     premoveQueue = state.premoveQueue,
                     arrows = arrows,
@@ -420,7 +448,81 @@ private fun LocalBoardContent(
             }
         }
 
+        if (state.botDialogueText.isNotBlank() && state.mode != PlayMode.PASS_AND_PLAY) {
+            item {
+                Surface(
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.75f),
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(
+                        text = "Bot: \"${state.botDialogueText}\"",
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.padding(10.dp),
+                    )
+                }
+            }
+        }
+
+        state.gambitMatch?.let { g ->
+            item {
+                Surface(
+                    color = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.7f),
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text(
+                            text = "${g.name} (${g.eco}) • Gambit ${g.status}",
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.Bold,
+                        )
+                        Text(g.recommendedIdeas, style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+            }
+        }
+
+        state.endgameClassification?.let { eg ->
+            item {
+                Surface(
+                    color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.65f),
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(
+                        text = "Endgame: ${eg.title} — ${eg.keyPrinciple}",
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.padding(10.dp),
+                    )
+                }
+            }
+        }
+
         // Action Controls Row
+        if (state.mode == PlayMode.BOT_VS_BOT && !state.gameStatus.isTerminal) {
+            item {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    FilledTonalButton(
+                        onClick = onToggleBotVsBotPause,
+                        modifier = Modifier.weight(1f).testTag("bot_vs_bot_pause_btn"),
+                    ) {
+                        Text(if (state.botVsBotPaused) "Resume Match" else "Pause Match")
+                    }
+                    OutlinedButton(
+                        onClick = onStepBotVsBotNext,
+                        enabled = !state.isBotThinking,
+                        modifier = Modifier.weight(1f).testTag("bot_vs_bot_step_btn"),
+                    ) {
+                        Text("Step Next Move")
+                    }
+                }
+            }
+        }
+
         item {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -431,7 +533,7 @@ private fun LocalBoardContent(
                 }
                 IconButton(
                     onClick = onTakeback,
-                    enabled = !state.gameStatus.isTerminal && state.moveHistorySan.isNotEmpty(),
+                    enabled = !state.gameStatus.isTerminal && state.moveHistorySan.isNotEmpty() && state.mode != PlayMode.BOT_VS_BOT,
                     modifier = Modifier.testTag("takeback_btn"),
                 ) {
                     Icon(Icons.AutoMirrored.Filled.Undo, contentDescription = "Takeback")
@@ -623,7 +725,7 @@ private fun PlayerClockBar(
 private fun NewLocalGameBottomSheet(
     currentState: LocalGameUiState,
     onDismiss: () -> Unit,
-    onStart: (PlayMode, ChessVariant, TimeControl, PieceColor, com.example.chess.BotProfile) -> Unit,
+    onStart: (PlayMode, ChessVariant, TimeControl, PieceColor, BotProfile, BotProfile) -> Unit,
 ) {
     var mode by remember { mutableStateOf(currentState.mode) }
     var variant by remember { mutableStateOf(currentState.variant) }
@@ -634,6 +736,7 @@ private fun NewLocalGameBottomSheet(
     var customClockType by remember { mutableStateOf(ClockType.FISCHER) }
     var humanColor by remember { mutableStateOf(currentState.humanColor) }
     var bot by remember { mutableStateOf(currentState.bot) }
+    var botBlack by remember { mutableStateOf(currentState.botBlack) }
 
     ModalBottomSheet(onDismissRequest = onDismiss) {
         LazyColumn(
@@ -644,7 +747,7 @@ private fun NewLocalGameBottomSheet(
                 Text("New Game Setup", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
             }
             item {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     FilterChip(
                         selected = mode == PlayMode.VS_BOT,
                         onClick = { mode = PlayMode.VS_BOT },
@@ -655,11 +758,19 @@ private fun NewLocalGameBottomSheet(
                         onClick = { mode = PlayMode.PASS_AND_PLAY },
                         label = { Text("Over the Board (2P)") },
                     )
+                    FilterChip(
+                        selected = mode == PlayMode.BOT_VS_BOT,
+                        onClick = { mode = PlayMode.BOT_VS_BOT },
+                        label = { Text("Bot vs Bot") },
+                    )
                 }
             }
-            if (mode == PlayMode.VS_BOT) {
+            if (mode == PlayMode.VS_BOT || mode == PlayMode.BOT_VS_BOT) {
                 item {
-                    Text("Select Bot Opponent", style = MaterialTheme.typography.labelLarge)
+                    Text(
+                        if (mode == PlayMode.BOT_VS_BOT) "White Bot (${ChessHubBots.ALL.size} Profiles)" else "Select Bot Opponent (${ChessHubBots.ALL.size} Bots)",
+                        style = MaterialTheme.typography.labelLarge,
+                    )
                     LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         items(ChessHubBots.ALL) { b ->
                             FilterChip(
@@ -669,18 +780,32 @@ private fun NewLocalGameBottomSheet(
                             )
                         }
                     }
-                    Text(bot.bio, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 6.dp)) {
-                        FilterChip(
-                            selected = humanColor == PieceColor.WHITE,
-                            onClick = { humanColor = PieceColor.WHITE },
-                            label = { Text("Play White") },
-                        )
-                        FilterChip(
-                            selected = humanColor == PieceColor.BLACK,
-                            onClick = { humanColor = PieceColor.BLACK },
-                            label = { Text("Play Black") },
-                        )
+                    Text("${bot.title} • ${bot.styleTag} — ${bot.bio}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    if (mode == PlayMode.VS_BOT) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 6.dp)) {
+                            FilterChip(
+                                selected = humanColor == PieceColor.WHITE,
+                                onClick = { humanColor = PieceColor.WHITE },
+                                label = { Text("Play White") },
+                            )
+                            FilterChip(
+                                selected = humanColor == PieceColor.BLACK,
+                                onClick = { humanColor = PieceColor.BLACK },
+                                label = { Text("Play Black") },
+                            )
+                        }
+                    } else {
+                        Spacer(Modifier.height(8.dp))
+                        Text("Black Bot", style = MaterialTheme.typography.labelLarge)
+                        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            items(ChessHubBots.ALL) { b ->
+                                FilterChip(
+                                    selected = botBlack.id == b.id,
+                                    onClick = { botBlack = b },
+                                    label = { Text("${b.name} (${b.approxStrengthLabel})") },
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -748,7 +873,7 @@ private fun NewLocalGameBottomSheet(
                     )
                 } else selectedPreset
                 Button(
-                    onClick = { onStart(mode, variant, chosenTc, humanColor, bot) },
+                    onClick = { onStart(mode, variant, chosenTc, humanColor, bot, botBlack) },
                     modifier = Modifier.fillMaxWidth().height(50.dp).testTag("start_configured_game_btn"),
                 ) {
                     Text("Start Game")
@@ -764,11 +889,13 @@ private fun NewLocalGameBottomSheet(
 private fun OnlinePlayContent(
     isOnline: Boolean,
     currentUserId: String?,
+    myProfile: PublicProfileDoc?,
     settings: AppSettings,
     boardTheme: com.example.ui.theme.BoardThemeColors,
     searchingTicketId: String?,
     activeGame: OnlineGameDoc?,
     chatMessages: List<GameChatMessageDoc>,
+    ratingDelta: RatingDeltaResult?,
     onStartMatchmaking: (ChessVariant, TimeControl, Boolean) -> Unit,
     onCancelMatchmaking: () -> Unit,
     onOnlineMove: (Move) -> Unit,
@@ -842,6 +969,21 @@ private fun OnlinePlayContent(
                 ) {
                     Text("Rated Game (Glicko-2)", style = MaterialTheme.typography.bodyMedium)
                     Switch(checked = rated, onCheckedChange = { rated = it })
+                }
+                if (rated) {
+                    val myR = when (tc.category) {
+                        "bullet" -> (myProfile?.bulletRating ?: 1500L).toDouble()
+                        "rapid" -> (myProfile?.rapidRating ?: 1500L).toDouble()
+                        "classical" -> (myProfile?.classicalRating ?: 1500L).toDouble()
+                        else -> (myProfile?.blitzRating ?: 1500L).toDouble()
+                    }
+                    val previewWin = Glicko2RatingSystem.updateSingleGame(GlickoRating(myR), GlickoRating(myR), 1.0).displayInt - myR.toInt()
+                    val previewLoss = Glicko2RatingSystem.updateSingleGame(GlickoRating(myR), GlickoRating(myR), 0.0).displayInt - myR.toInt()
+                    Text(
+                        text = "Est. vs equal opponent: Win +$previewWin / Loss $previewLoss (Your ${tc.category}: ${myR.toInt()})",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
                 }
             }
             item {
@@ -918,6 +1060,10 @@ private fun OnlinePlayContent(
                         showLegalMoves = settings.showLegalMoves,
                         showLastMove = settings.showLastMove,
                         autoQueen = settings.autoQueen,
+                        pieceStyleId = settings.pieceStyleId,
+                        moveAnimation = settings.moveAnimation,
+                        reducedAnimations = settings.reducedAnimations,
+                        animationSpeed = settings.animationSpeed,
                         onMoveSelected = onOnlineMove,
                     )
                 }
@@ -934,13 +1080,32 @@ private fun OnlinePlayContent(
             } else if (activeGame.status == "finished") {
                 item {
                     Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)) {
-                        Row(
+                        Column(
                             modifier = Modifier.fillMaxWidth().padding(12.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically,
+                            verticalArrangement = Arrangement.spacedBy(6.dp),
                         ) {
-                            Text("${activeGame.result} • ${activeGame.resultReason}", fontWeight = FontWeight.Bold)
-                            Button(onClick = { onAnalyzePgn(activeGame.pgn) }) { Text("Analyze") }
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text("${activeGame.result} • ${activeGame.resultReason}", fontWeight = FontWeight.Bold)
+                                Button(onClick = { onAnalyzePgn(activeGame.pgn) }) { Text("Analyze") }
+                            }
+                            if (ratingDelta != null) {
+                                val sign = if (ratingDelta.delta >= 0) "+${ratingDelta.delta}" else "${ratingDelta.delta}"
+                                Text(
+                                    text = if (ratingDelta.isRated) {
+                                        "Rating: ${ratingDelta.oldRating} → ${ratingDelta.newRating} ($sign)"
+                                    } else {
+                                        "Casual — Unrated (${ratingDelta.oldRating})"
+                                    },
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                )
+                            } else if (!activeGame.ratedGame) {
+                                Text("Casual — Unrated", style = MaterialTheme.typography.labelMedium)
+                            }
                         }
                     }
                 }
@@ -977,6 +1142,11 @@ private fun OnlinePlayContent(
 private fun playerLabelFor(state: LocalGameUiState, color: PieceColor): String = when (state.mode) {
     PlayMode.PASS_AND_PLAY -> if (color == PieceColor.WHITE) "White (OTB)" else "Black (OTB)"
     PlayMode.VS_BOT -> if (color == state.humanColor) "You" else "${state.bot.name} (${state.bot.approxStrengthLabel})"
+    PlayMode.BOT_VS_BOT -> if (color == PieceColor.WHITE) {
+        "${state.bot.name} (${state.bot.approxStrengthLabel})"
+    } else {
+        "${state.botBlack.name} (${state.botBlack.approxStrengthLabel})"
+    }
 }
 
 private fun formatClockMs(ms: Long): String {

@@ -34,6 +34,8 @@ import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.MusicNote
+import androidx.compose.material.icons.filled.Newspaper
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Psychology
 import androidx.compose.material.icons.filled.School
@@ -222,11 +224,14 @@ fun HomeScreen(
     recentGames: List<LocalGameEntity>,
     activeLocalMoveCount: Int,
     tournaments: List<TournamentDoc>,
+    isMusicPlaying: Boolean,
     onQuickPlayPreset: (TimeControl, ChessVariant, PlayMode) -> Unit,
     onNavigateToTab: (Int) -> Unit,
     onOpenPuzzleMode: () -> Unit,
     onOpenReviewForGame: (LocalGameEntity) -> Unit,
     onOpenSettings: () -> Unit,
+    onOpenMusicPlayer: () -> Unit,
+    onOpenNewsReader: () -> Unit,
     onToggleHomeCard: (String) -> Unit,
     onReorderHomeCard: (String, Int) -> Unit,
     onSwitchToOnlineSignIn: () -> Unit,
@@ -347,6 +352,30 @@ fun HomeScreen(
                             Text("OTB")
                         }
                     }
+                }
+            }
+        }
+
+        item {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                FilledTonalButton(
+                    onClick = onOpenMusicPlayer,
+                    modifier = Modifier.weight(1f).testTag("home_music_btn"),
+                ) {
+                    Icon(Icons.Default.MusicNote, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text(if (isMusicPlaying) "Music: Playing" else "Focus Music")
+                }
+                OutlinedButton(
+                    onClick = onOpenNewsReader,
+                    modifier = Modifier.weight(1f).testTag("home_news_btn"),
+                ) {
+                    Icon(Icons.Default.Newspaper, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("Chess News")
                 }
             }
         }

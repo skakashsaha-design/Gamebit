@@ -1,6 +1,5 @@
 package com.example
 
-import android.content.Context
 import android.content.Intent
 import android.content.res.Configuration
 import android.os.Bundle
@@ -33,6 +32,7 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
@@ -52,7 +52,10 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.example.audio.MusicPlayContext
+import com.example.audio.MusicPlayerManager
 import com.example.audio.SoundAndHapticsManager
+import com.example.audio.VoiceCoachManager
 import com.example.auth.GoogleAuthHelper
 import com.example.chess.ChessVariant
 import com.example.data.local.AppSettings
@@ -67,9 +70,11 @@ import com.example.data.remote.ExternalPlayerSummary
 import com.example.data.remote.ExternalTvChannel
 import com.example.ui.screens.AnalyzeScreen
 import com.example.ui.screens.AuthScreen
+import com.example.ui.screens.ChessNewsScreen
 import com.example.ui.screens.CommunityHubScreen
 import com.example.ui.screens.HomeScreen
 import com.example.ui.screens.LearnScreen
+import com.example.ui.screens.MusicPlayerScreen
 import com.example.ui.screens.PlayScreen
 import com.example.ui.screens.SettingsAndAboutScreen
 import com.example.ui.theme.ChessHubTheme
@@ -86,6 +91,7 @@ import com.google.firebase.auth.FirebaseUser
 import com.google.firebase.auth.auth
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.launch
 import java.util.Locale
@@ -149,9 +155,25 @@ fun ChessHubRoot(
     val appContext = baseContext.applicationContext
 
     val settingsRepo = remember { SettingsRepository(appContext) }
-    val localRepo = remember { LocalChessRepository(ChessHubDatabase.getInstance(appContext).chessHubDao()) }
+    val db = remember { ChessHubDatabase.getInstance(appContext) }
+    val localRepo = remember {
+        LocalChessRepository(
+            dao = db.chessHubDao(),
+            puzzleDao = db.chessPuzzleDao(),
+            mediaDao = db.mediaAndNewsDao(),
+        )
+    }
     val soundManager = remember { SoundAndHapticsManager(appContext) }
+    val voiceCoach = remember { VoiceCoachManager(appContext) }
+    val musicManager = remember { MusicPlayerManager(appContext) }
     val externalApis = remember { ExternalChessApis() }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            voiceCoach.shutdown()
+            musicManager.release()
+        }
+    }
 
     val settings by settingsRepo.settings.collectAsStateWithLifecycle(initialValue = AppSettings())
     val baseConfig = androidx.compose.ui.platform.LocalConfiguration.current
@@ -257,6 +279,8 @@ fun ChessHubRoot(
                         settingsRepo = settingsRepo,
                         localRepo = localRepo,
                         soundManager = soundManager,
+                        voiceCoach = voiceCoach,
+                        musicManager = musicManager,
                         externalApis = externalApis,
                         incomingPayload = incomingPayload,
                         onConsumeIncomingPayload = onConsumeIncomingPayload,
@@ -273,6 +297,8 @@ fun ChessHubRoot(
                             settingsRepo = settingsRepo,
                             localRepo = localRepo,
                             soundManager = soundManager,
+                            voiceCoach = voiceCoach,
+                            musicManager = musicManager,
                             externalApis = externalApis,
                             incomingPayload = incomingPayload,
                             onConsumeIncomingPayload = onConsumeIncomingPayload,
@@ -298,6 +324,8 @@ private fun ChessHubMainShell(
     settingsRepo: SettingsRepository,
     localRepo: LocalChessRepository,
     soundManager: SoundAndHapticsManager,
+    voiceCoach: VoiceCoachManager,
+    musicManager: MusicPlayerManager,
     externalApis: ExternalChessApis,
     incomingPayload: String?,
     onConsumeIncomingPayload: () -> Unit,
@@ -309,13 +337,13 @@ private fun ChessHubMainShell(
     val snackbarHostState = remember { SnackbarHostState() }
 
     val localGameVm: LocalGameViewModel = viewModel(
-        factory = simpleVmFactory { LocalGameViewModel(localRepo, soundManager) },
+        factory = simpleVmFactory { LocalGameViewModel(localRepo, soundManager, voiceCoach) },
     )
     val analysisVm: AnalysisAndReviewViewModel = viewModel(
         factory = simpleVmFactory { AnalysisAndReviewViewModel(localRepo, externalApis) },
     )
     val trainingVm: TrainingViewModel = viewModel(
-        factory = simpleVmFactory { TrainingViewModel(localRepo, settingsRepo, externalApis) },
+        factory = simpleVmFactory { TrainingViewModel(localRepo, settingsRepo, externalApis, voiceCoach) },
     )
 
     // Strictly instantiate OnlineViewModel ONLY when authenticated
@@ -335,13 +363,33 @@ private fun ChessHubMainShell(
         )
     } else null
 
+    var selectedTab by remember { mutableIntStateOf(0) }
+    var showSettings by remember { mutableStateOf(false) }
+    var showMusicPlayer by remember { mutableStateOf(false) }
+    var showNewsReader by remember { mutableStateOf(false) }
+
+    val userMusicTracks by localRepo.observeMusicTracks().collectAsStateWithLifecycle(initialValue = emptyList())
+    val musicState by musicManager.uiState.collectAsStateWithLifecycle()
+    val cachedNews by localRepo.observeCachedNews().collectAsStateWithLifecycle(initialValue = emptyList())
+
+    LaunchedEffect(userMusicTracks) {
+        musicManager.syncUserTracks(userMusicTracks)
+    }
+
     LaunchedEffect(settings) {
         localGameVm.updateSettings(settings)
         analysisVm.updateSettings(settings)
+        trainingVm.updateSettings(settings)
     }
 
-    var selectedTab by remember { mutableIntStateOf(0) }
-    var showSettings by remember { mutableStateOf(false) }
+    val musicContext = when (selectedTab) {
+        1 -> MusicPlayContext.GAME
+        2 -> MusicPlayContext.TRAINING
+        else -> MusicPlayContext.MENU
+    }
+    LaunchedEffect(settings, musicContext) {
+        musicManager.applySettings(settings, musicContext)
+    }
 
     LaunchedEffect(incomingPayload) {
         val payload = incomingPayload ?: return@LaunchedEffect
@@ -357,9 +405,11 @@ private fun ChessHubMainShell(
     val localGameState by localGameVm.uiState.collectAsStateWithLifecycle()
     val analysisState by analysisVm.uiState.collectAsStateWithLifecycle()
     val puzzleState by trainingVm.puzzleState.collectAsStateWithLifecycle()
-    val coordState by trainingVm.coordState.collectAsStateWithLifecycle()
+    val puzzleCollection by trainingVm.puzzleCollection.collectAsStateWithLifecycle()
     val puzzleAttempts by trainingVm.puzzleAttempts.collectAsStateWithLifecycle()
     val lessonProgress by trainingVm.lessonProgress.collectAsStateWithLifecycle()
+    val drillState by trainingVm.drillState.collectAsStateWithLifecycle()
+    val coordState by trainingVm.coordState.collectAsStateWithLifecycle()
 
     val savedGames by localRepo.observeGames().collectAsStateWithLifecycle(initialValue = emptyList())
     val studies by localRepo.observeStudies().collectAsStateWithLifecycle(initialValue = emptyList())
@@ -371,27 +421,29 @@ private fun ChessHubMainShell(
     var offlineExtPlayer by remember { mutableStateOf<ExternalPlayerSummary?>(null) }
 
     // Online state subscriptions (when onlineVm != null)
-    val onlineStatusMsg by (onlineVm?.statusMessage ?: kotlinx.coroutines.flow.MutableStateFlow(null)).collectAsStateWithLifecycle()
-    val onlineIsAdmin by (onlineVm?.isAdmin ?: kotlinx.coroutines.flow.MutableStateFlow(false)).collectAsStateWithLifecycle()
-    val myProfileState by (onlineVm?.myProfile ?: kotlinx.coroutines.flow.MutableStateFlow(UiState.Loading)).collectAsStateWithLifecycle()
+    val onlineStatusMsg by (onlineVm?.statusMessage ?: MutableStateFlow(null)).collectAsStateWithLifecycle()
+    val onlineIsAdmin by (onlineVm?.isAdmin ?: MutableStateFlow(false)).collectAsStateWithLifecycle()
+    val myProfileState by (onlineVm?.myProfile ?: MutableStateFlow(UiState.Loading)).collectAsStateWithLifecycle()
     val myProfile = (myProfileState as? UiState.Success)?.data
-    val searchingTicketId by (onlineVm?.searchingTicketId ?: kotlinx.coroutines.flow.MutableStateFlow(null)).collectAsStateWithLifecycle()
-    val activeOnlineGame by (onlineVm?.activeGameDoc ?: kotlinx.coroutines.flow.MutableStateFlow(null)).collectAsStateWithLifecycle()
-    val onlineChat by (onlineVm?.activeGameChat ?: kotlinx.coroutines.flow.MutableStateFlow(emptyList())).collectAsStateWithLifecycle()
-    val tournamentsState by (onlineVm?.tournaments ?: kotlinx.coroutines.flow.MutableStateFlow(UiState.Loading)).collectAsStateWithLifecycle()
-    val tournamentEntries by (onlineVm?.selectedTournamentEntries ?: kotlinx.coroutines.flow.MutableStateFlow(emptyList())).collectAsStateWithLifecycle()
-    val clubsState by (onlineVm?.clubs ?: kotlinx.coroutines.flow.MutableStateFlow(UiState.Loading)).collectAsStateWithLifecycle()
-    val teamsState by (onlineVm?.teams ?: kotlinx.coroutines.flow.MutableStateFlow(UiState.Loading)).collectAsStateWithLifecycle()
-    val liveWatchState by (onlineVm?.liveWatchGames ?: kotlinx.coroutines.flow.MutableStateFlow(UiState.Loading)).collectAsStateWithLifecycle()
-    val leaderboardState by (onlineVm?.leaderboard ?: kotlinx.coroutines.flow.MutableStateFlow(UiState.Loading)).collectAsStateWithLifecycle()
-    val friendshipsState by (onlineVm?.friendships ?: kotlinx.coroutines.flow.MutableStateFlow(UiState.Loading)).collectAsStateWithLifecycle()
-    val threadsState by (onlineVm?.messageThreads ?: kotlinx.coroutines.flow.MutableStateFlow(UiState.Loading)).collectAsStateWithLifecycle()
-    val directMessages by (onlineVm?.directMessages ?: kotlinx.coroutines.flow.MutableStateFlow(emptyList())).collectAsStateWithLifecycle()
-    val publicStudiesState by (onlineVm?.publicStudies ?: kotlinx.coroutines.flow.MutableStateFlow(UiState.Loading)).collectAsStateWithLifecycle()
-    val onlineBroadcasts by (onlineVm?.broadcasts ?: kotlinx.coroutines.flow.MutableStateFlow(emptyList())).collectAsStateWithLifecycle()
-    val onlineTv by (onlineVm?.tvChannels ?: kotlinx.coroutines.flow.MutableStateFlow(emptyList())).collectAsStateWithLifecycle()
-    val onlineExtPlayer by (onlineVm?.externalPlayerSummary ?: kotlinx.coroutines.flow.MutableStateFlow(null)).collectAsStateWithLifecycle()
-    val adminReports by (onlineVm?.adminReports ?: kotlinx.coroutines.flow.MutableStateFlow(emptyList())).collectAsStateWithLifecycle()
+    val searchingTicketId by (onlineVm?.searchingTicketId ?: MutableStateFlow(null)).collectAsStateWithLifecycle()
+    val activeOnlineGame by (onlineVm?.activeGameDoc ?: MutableStateFlow(null)).collectAsStateWithLifecycle()
+    val onlineChat by (onlineVm?.activeGameChat ?: MutableStateFlow(emptyList())).collectAsStateWithLifecycle()
+    val onlineRatingDelta by (onlineVm?.lastRatingDelta ?: MutableStateFlow(null)).collectAsStateWithLifecycle()
+    val playerSearchResults by (onlineVm?.playerSearchResults ?: MutableStateFlow(emptyList())).collectAsStateWithLifecycle()
+    val tournamentsState by (onlineVm?.tournaments ?: MutableStateFlow(UiState.Loading)).collectAsStateWithLifecycle()
+    val tournamentEntries by (onlineVm?.selectedTournamentEntries ?: MutableStateFlow(emptyList())).collectAsStateWithLifecycle()
+    val clubsState by (onlineVm?.clubs ?: MutableStateFlow(UiState.Loading)).collectAsStateWithLifecycle()
+    val teamsState by (onlineVm?.teams ?: MutableStateFlow(UiState.Loading)).collectAsStateWithLifecycle()
+    val liveWatchState by (onlineVm?.liveWatchGames ?: MutableStateFlow(UiState.Loading)).collectAsStateWithLifecycle()
+    val leaderboardState by (onlineVm?.leaderboard ?: MutableStateFlow(UiState.Loading)).collectAsStateWithLifecycle()
+    val friendshipsState by (onlineVm?.friendships ?: MutableStateFlow(UiState.Loading)).collectAsStateWithLifecycle()
+    val threadsState by (onlineVm?.messageThreads ?: MutableStateFlow(UiState.Loading)).collectAsStateWithLifecycle()
+    val directMessages by (onlineVm?.directMessages ?: MutableStateFlow(emptyList())).collectAsStateWithLifecycle()
+    val publicStudiesState by (onlineVm?.publicStudies ?: MutableStateFlow(UiState.Loading)).collectAsStateWithLifecycle()
+    val onlineBroadcasts by (onlineVm?.broadcasts ?: MutableStateFlow(emptyList())).collectAsStateWithLifecycle()
+    val onlineTv by (onlineVm?.tvChannels ?: MutableStateFlow(emptyList())).collectAsStateWithLifecycle()
+    val onlineExtPlayer by (onlineVm?.externalPlayerSummary ?: MutableStateFlow(null)).collectAsStateWithLifecycle()
+    val adminReports by (onlineVm?.adminReports ?: MutableStateFlow(emptyList())).collectAsStateWithLifecycle()
 
     LaunchedEffect(onlineStatusMsg) {
         val msg = onlineStatusMsg ?: return@LaunchedEffect
@@ -403,8 +455,46 @@ private fun ChessHubMainShell(
         if (activeOnlineGame != null) selectedTab = 1
     }
 
-    BackHandler(enabled = showSettings || selectedTab != 0) {
-        if (showSettings) showSettings = false else selectedTab = 0
+    BackHandler(enabled = showSettings || showMusicPlayer || showNewsReader || selectedTab != 0) {
+        when {
+            showMusicPlayer -> showMusicPlayer = false
+            showNewsReader -> showNewsReader = false
+            showSettings -> showSettings = false
+            else -> selectedTab = 0
+        }
+    }
+
+    if (showMusicPlayer) {
+        MusicPlayerScreen(
+            musicState = musicState,
+            musicManager = musicManager,
+            settings = settings,
+            onAddPickedTracks = { picked ->
+                scope.launch {
+                    picked.forEach { track -> localRepo.saveMusicTrack(track) }
+                }
+            },
+            onDeleteTrack = { id ->
+                scope.launch { localRepo.deleteMusicTrack(id) }
+            },
+            onMusicEnabledChange = { scope.launch { settingsRepo.setMusicEnabled(it) } },
+            onMusicVolumeChange = { scope.launch { settingsRepo.setMusicVolume(it) } },
+            onMusicScopeChange = { sc, en -> scope.launch { settingsRepo.setMusicScope(sc, en) } },
+            onLowMemAudioChange = { scope.launch { settingsRepo.setLowMemoryAudioMode(it) } },
+            onBack = { showMusicPlayer = false },
+        )
+        return
+    }
+
+    if (showNewsReader) {
+        ChessNewsScreen(
+            cachedNews = cachedNews,
+            externalApis = externalApis,
+            onSaveCachedNews = { items -> scope.launch { localRepo.saveCachedNews(items) } },
+            onClearNewsCache = { scope.launch { localRepo.clearNewsCache() } },
+            onBack = { showNewsReader = false },
+        )
+        return
     }
 
     if (showSettings) {
@@ -415,20 +505,51 @@ private fun ChessHubMainShell(
             onDarkThemeChange = { scope.launch { settingsRepo.setDarkTheme(it) } },
             onHighContrastChange = { scope.launch { settingsRepo.setHighContrast(it) } },
             onBoardThemeChange = { scope.launch { settingsRepo.setBoardTheme(it) } },
+            onPieceStyleChange = { scope.launch { settingsRepo.setPieceStyle(it) } },
             onShowCoordsChange = { scope.launch { settingsRepo.setShowCoordinates(it) } },
             onShowLegalChange = { scope.launch { settingsRepo.setShowLegalMoves(it) } },
+            onShowLastMoveChange = { scope.launch { settingsRepo.setShowLastMove(it) } },
+            onMoveAnimationChange = { scope.launch { settingsRepo.setMoveAnimation(it) } },
+            onReducedAnimationsChange = { scope.launch { settingsRepo.setReducedAnimations(it) } },
+            onAnimationSpeedChange = { scope.launch { settingsRepo.setAnimationSpeed(it) } },
             onLowMemoryChange = { scope.launch { settingsRepo.setLowMemoryMode(it) } },
             onAutoQueenChange = { scope.launch { settingsRepo.setAutoQueen(it) } },
             onConfirmMoveChange = { scope.launch { settingsRepo.setConfirmMoves(it) } },
             onPremoveChange = { scope.launch { settingsRepo.setPremoveEnabled(it) } },
+            onCoordNotationChange = { scope.launch { settingsRepo.setCoordinateNotation(it) } },
             onSoundChange = { scope.launch { settingsRepo.setSoundEnabled(it) } },
             onSoundVolumeChange = { scope.launch { settingsRepo.setSoundVolume(it) } },
+            onSfxFlagChange = { cat, en -> scope.launch { settingsRepo.setSfxFlag(cat, en) } },
             onHapticsChange = { scope.launch { settingsRepo.setHapticsEnabled(it) } },
+            onBotVoiceChange = { scope.launch { settingsRepo.setBotVoiceEnabled(it) } },
+            onTrainerVoiceChange = { scope.launch { settingsRepo.setTrainerVoiceEnabled(it) } },
+            onVoiceVolumeChange = { scope.launch { settingsRepo.setVoiceVolume(it) } },
+            onMusicEnabledChange = { scope.launch { settingsRepo.setMusicEnabled(it) } },
+            onMusicVolumeChange = { scope.launch { settingsRepo.setMusicVolume(it) } },
+            onMusicScopeChange = { sc, en -> scope.launch { settingsRepo.setMusicScope(sc, en) } },
+            onLowMemAudioChange = { scope.launch { settingsRepo.setLowMemoryAudioMode(it) } },
+            onOpenMusicPlayer = { showMusicPlayer = true },
             onEvalBarChange = { scope.launch { settingsRepo.setShowEvalBar(it) } },
+            onBestMoveArrowChange = { scope.launch { settingsRepo.setShowBestMoveArrow(it) } },
             onThreatArrowChange = { scope.launch { settingsRepo.setShowThreatArrow(it) } },
+            onAllowBoardArrowsChange = { scope.launch { settingsRepo.setAllowBoardArrows(it) } },
+            onEngineDepthChange = { scope.launch { settingsRepo.setEngineDepth(it) } },
+            onEngineMultiPvChange = { scope.launch { settingsRepo.setEngineMultiPv(it) } },
+            onOpeningBookChange = { scope.launch { settingsRepo.setOpeningRecognitionFlag("book", it) } },
+            onOpeningRecogChange = { scope.launch { settingsRepo.setOpeningRecognitionFlag("opening", it) } },
+            onGambitRecogChange = { scope.launch { settingsRepo.setOpeningRecognitionFlag("gambit", it) } },
+            onEndgameRecogChange = { scope.launch { settingsRepo.setOpeningRecognitionFlag("endgame", it) } },
             onAllowChatChange = { scope.launch { settingsRepo.setAllowChatInGames(it) } },
+            onSocialFeedChange = { scope.launch { settingsRepo.setShowSocialFeed(it) } },
+            onNotificationsChange = { scope.launch { settingsRepo.setNotificationsEnabled(it) } },
             onFontScaleChange = { scope.launch { settingsRepo.setFontScale(it) } },
             onLanguageChange = { scope.launch { settingsRepo.setLanguage(it) } },
+            onClearNewsCache = {
+                scope.launch {
+                    localRepo.clearNewsCache()
+                    snackbarHostState.showSnackbar("Cleared cached chess news articles")
+                }
+            },
         )
         return
     }
@@ -496,6 +617,7 @@ private fun ChessHubMainShell(
                             recentGames = savedGames,
                             activeLocalMoveCount = localGameState.moveHistorySan.size,
                             tournaments = (tournamentsState as? UiState.Success)?.data ?: emptyList(),
+                            isMusicPlaying = musicState.isPlaying,
                             onQuickPlayPreset = { tc, variant, mode ->
                                 localGameVm.startNewGame(mode, variant, tc, localGameState.humanColor)
                                 selectedTab = 1
@@ -510,6 +632,8 @@ private fun ChessHubMainShell(
                                 selectedTab = 3
                             },
                             onOpenSettings = { showSettings = true },
+                            onOpenMusicPlayer = { showMusicPlayer = true },
+                            onOpenNewsReader = { showNewsReader = true },
                             onToggleHomeCard = { cardId ->
                                 scope.launch { settingsRepo.toggleHomeCard(cardId, settings.hiddenHomeCards) }
                             },
@@ -530,18 +654,22 @@ private fun ChessHubMainShell(
                             settings = settings,
                             isOnline = isOnline,
                             currentUserId = onlineUser?.uid,
+                            myProfile = myProfile,
                             searchingTicketId = searchingTicketId,
                             activeOnlineGame = activeOnlineGame,
                             onlineChatMessages = onlineChat,
+                            onlineRatingDelta = onlineRatingDelta,
                             onLocalMove = { localGameVm.onUserMove(it) },
                             onQueuePremove = { localGameVm.queuePremove(it) },
                             onClearPremoves = { localGameVm.clearPremoves() },
                             onConfirmMove = { localGameVm.confirmPendingMove() },
                             onCancelConfirmMove = { localGameVm.cancelPendingMove() },
                             onSelectDropPiece = { localGameVm.selectDropPiece(it) },
-                            onStartNewLocalGame = { mode, variant, tc, color, bot ->
-                                localGameVm.startNewGame(mode, variant, tc, color, bot)
+                            onStartNewLocalGame = { mode, variant, tc, color, bot, botBlack ->
+                                localGameVm.startNewGame(mode, variant, tc, color, bot, botBlack)
                             },
+                            onToggleBotVsBotPause = { localGameVm.toggleBotVsBotPause() },
+                            onStepBotVsBotNext = { localGameVm.stepBotVsBotNext() },
                             onToggleFlip = { localGameVm.toggleFlip() },
                             onToggleClockPause = { localGameVm.toggleClockPause() },
                             onTakeback = { localGameVm.takebackMove() },
@@ -558,22 +686,36 @@ private fun ChessHubMainShell(
                             onResignOnline = { onlineVm?.resignOnlineGame() },
                             onOfferOnlineDraw = { onlineVm?.offerOnlineDraw() },
                             onSendOnlineChat = { txt -> onlineVm?.sendGameChat(txt) },
-                            onCloseOnlineGame = { onlineVm?.closeActiveOnlineGame() },
+                            onCloseOnlineGame = {
+                                onlineVm?.clearLastRatingDelta()
+                                onlineVm?.closeActiveOnlineGame()
+                            },
                             onRequestOnlineSignIn = onSwitchToOnlineSignIn,
                         )
                         2 -> LearnScreen(
                             settings = settings,
                             puzzleState = puzzleState,
+                            puzzleCollection = puzzleCollection,
                             puzzleAttempts = puzzleAttempts,
                             lessonProgress = lessonProgress,
+                            drillState = drillState,
                             coordState = coordState,
                             onSelectPuzzleMode = { m, th -> trainingVm.selectPuzzleMode(m, th) },
                             onSelectTheme = { th -> trainingVm.selectThemeFilter(th) },
+                            onSelectDifficultyBand = { band -> trainingVm.selectDifficultyBand(band) },
                             onSubmitPuzzleMove = { m -> trainingVm.submitPuzzleMove(m) },
                             onRetryPuzzle = { trainingVm.retryPuzzle() },
                             onNextPuzzle = { trainingVm.nextPuzzle() },
                             onRevealHint = { trainingVm.revealHint() },
+                            onToggleBookmarkPuzzle = { trainingVm.toggleBookmarkCurrentPuzzle() },
+                            onCreateCustomPuzzle = { title, fen, sol, rating, theme, hint, exp ->
+                                trainingVm.createCustomPuzzle(title, fen, sol, rating, theme, hint, exp)
+                            },
+                            onDeleteCustomPuzzle = { id -> trainingVm.deletePuzzle(id) },
+                            onLoadSpecificPuzzle = { pz -> trainingVm.loadSpecificPuzzle(pz) },
                             onCompleteLessonStep = { lesson, step -> trainingVm.markLessonStepCompleted(lesson, step) },
+                            onStartDrill = { drill -> trainingVm.startOpeningDrill(drill) },
+                            onSubmitDrillMove = { m -> trainingVm.submitDrillMove(m) },
                             onStartCoordTrainer = { fl -> trainingVm.startCoordinateTrainer(fl) },
                             onTapCoordSquare = { sq -> trainingVm.onCoordinateSquareTapped(sq) },
                             onPracticeEndgameInPlay = { fen ->
@@ -606,6 +748,15 @@ private fun ChessHubMainShell(
                             onToggleAutoplay = { analysisVm.toggleAutoplay() },
                             onSetComment = { analysisVm.setComment(it) },
                             onToggleNag = { analysisVm.toggleNag(it) },
+                            onToggleCircleSquare = { analysisVm.toggleUserCircle(it) },
+                            onToggleUserArrow = { f, t -> analysisVm.toggleUserArrow(f, t) },
+                            onClearAnnotations = { analysisVm.clearUserAnnotations() },
+                            onRunUciCommand = { cmd -> analysisVm.runUciCommand(cmd) },
+                            onRunUciBenchmark = { analysisVm.runUciBenchmarkHere() },
+                            onRestartUciEngine = { analysisVm.restartUciEngine() },
+                            onSaveCurrentAsPuzzle = { t, sol, th, r, h ->
+                                analysisVm.saveCurrentPositionAsPuzzle(t, sol, th, r, h)
+                            },
                             onRunFullReview = { analysisVm.runFullGameReview() },
                             onFetchExplorer = { analysisVm.fetchOnlineExplorer(it) },
                             onQueryTablebase = { analysisVm.queryEndgameTablebase() },
@@ -641,6 +792,7 @@ private fun ChessHubMainShell(
                             settings = settings,
                             myProfile = myProfile,
                             leaderboardState = leaderboardState,
+                            playerSearchResults = playerSearchResults,
                             tournamentsState = tournamentsState,
                             selectedTournamentEntries = tournamentEntries,
                             clubsState = clubsState,
@@ -656,6 +808,8 @@ private fun ChessHubMainShell(
                             adminReports = adminReports,
                             onRequestSignIn = onSwitchToOnlineSignIn,
                             onOpenSettings = { showSettings = true },
+                            onOpenNewsReader = { showNewsReader = true },
+                            onSearchPlayers = { q -> onlineVm?.searchPlayers(q) },
                             onCreateTournament = { n, f, v, tc -> onlineVm?.createTournament(n, f, v, tc) },
                             onJoinTournament = { t -> onlineVm?.joinTournament(t) },
                             onSelectTournamentForStandings = { id -> onlineVm?.observeTournamentStandings(id) },
@@ -688,6 +842,15 @@ private fun ChessHubMainShell(
                             onUpdateProfile = { name, bio, iso, fide, pub ->
                                 scope.launch { settingsRepo.setCountryAndFide(iso, fide) }
                                 onlineVm?.updateProfile(name, bio, iso, fide, pub)
+                            },
+                            onUpdateLocalIdentity = { name, bio ->
+                                scope.launch {
+                                    settingsRepo.setLocalIdentity(name, bio)
+                                    snackbarHostState.showSnackbar("Saved local player profile")
+                                }
+                            },
+                            onAvatarSelected = { avatarId ->
+                                scope.launch { settingsRepo.setLocalAvatarId(avatarId) }
                             },
                             onLookupExternalPlayer = { platform, user ->
                                 if (onlineVm != null) {

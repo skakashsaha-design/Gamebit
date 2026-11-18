@@ -4,9 +4,12 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
@@ -14,10 +17,15 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -96,6 +104,8 @@ fun EvaluationGraph(
     modifier: Modifier = Modifier,
 ) {
     if (reviewedMoves.isEmpty()) return
+    val zoomState = remember { mutableIntStateOf(1) }
+    val scrollState = rememberScrollState()
 
     Column(
         modifier = modifier
@@ -107,68 +117,94 @@ fun EvaluationGraph(
         Row(
             modifier = Modifier.fillMaxWidth().padding(bottom = 4.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
         ) {
             Text("Evaluation Graph (Tap to jump)", style = MaterialTheme.typography.labelSmall)
-            Text("White + / Black -", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+                FilterChip(
+                    selected = zoomState.intValue == 1,
+                    onClick = { zoomState.intValue = if (zoomState.intValue >= 3) 1 else zoomState.intValue + 1 },
+                    label = { Text("${zoomState.intValue}x", fontSize = 10.sp) },
+                    modifier = Modifier.testTag("eval_graph_zoom"),
+                )
+                OutlinedButton(
+                    onClick = { onSelectPly((selectedPly - 1).coerceAtLeast(1)) },
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                    modifier = Modifier.testTag("eval_graph_prev"),
+                ) { Text("<", fontSize = 11.sp) }
+                OutlinedButton(
+                    onClick = { onSelectPly((selectedPly + 1).coerceAtMost(reviewedMoves.last().ply)) },
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                    modifier = Modifier.testTag("eval_graph_next"),
+                ) { Text(">", fontSize = 11.sp) }
+            }
         }
 
-        Canvas(
+        BoxWithConstraints(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(92.dp)
-                .testTag("eval_graph")
-                .pointerInput(reviewedMoves) {
-                    detectTapGestures { offset ->
-                        if (reviewedMoves.isNotEmpty()) {
-                            val idx = ((offset.x / size.width) * reviewedMoves.size).toInt()
-                                .coerceIn(0, reviewedMoves.lastIndex)
-                            onSelectPly(reviewedMoves[idx].ply)
-                        }
-                    }
-                },
+                .horizontalScroll(scrollState),
         ) {
-            val midY = size.height / 2f
-            drawLine(
-                color = Color(0x5594A3B8),
-                start = Offset(0f, midY),
-                end = Offset(size.width, midY),
-                strokeWidth = 1.5f,
-            )
+            val baseWidth = maxWidth
+            Canvas(
+                modifier = Modifier
+                    .width(baseWidth * zoomState.intValue)
+                    .height(96.dp)
+                    .testTag("eval_graph")
+                    .pointerInput(reviewedMoves, zoomState.intValue) {
+                        detectTapGestures { offset ->
+                            if (reviewedMoves.isNotEmpty()) {
+                                val idx = ((offset.x / size.width) * reviewedMoves.size).toInt()
+                                    .coerceIn(0, reviewedMoves.lastIndex)
+                                onSelectPly(reviewedMoves[idx].ply)
+                            }
+                        }
+                    },
+            ) {
+                val midY = size.height / 2f
+                drawLine(
+                    color = Color(0x5594A3B8),
+                    start = Offset(0f, midY),
+                    end = Offset(size.width, midY),
+                    strokeWidth = 1.5f,
+                )
 
-            val stepX = if (reviewedMoves.size <= 1) size.width else size.width / (reviewedMoves.size - 1)
-            val linePath = Path()
-            reviewedMoves.forEachIndexed { i, m ->
-                val clamped = m.evalAfterCp.coerceIn(-800, 800)
-                val x = i * stepX
-                val y = midY - (clamped / 800f) * (size.height * 0.44f)
-                if (i == 0) linePath.moveTo(x, y) else linePath.lineTo(x, y)
-            }
-            drawPath(linePath, color = Color(0xFF10B981), style = Stroke(width = 3f))
+                val stepX = if (reviewedMoves.size <= 1) size.width else size.width / (reviewedMoves.size - 1)
+                val linePath = Path()
+                reviewedMoves.forEachIndexed { i, m ->
+                    val clamped = m.evalAfterCp.coerceIn(-800, 800)
+                    val x = i * stepX
+                    val y = midY - (clamped / 800f) * (size.height * 0.44f)
+                    if (i == 0) linePath.moveTo(x, y) else linePath.lineTo(x, y)
+                }
+                drawPath(linePath, color = Color(0xFF10B981), style = Stroke(width = 3f))
 
-            reviewedMoves.forEachIndexed { i, m ->
-                val x = i * stepX
-                val clamped = m.evalAfterCp.coerceIn(-800, 800)
-                val y = midY - (clamped / 800f) * (size.height * 0.44f)
-                if (m.ply == selectedPly) {
-                    drawLine(
-                        color = Color(0xAAFFFFFF),
-                        start = Offset(x, 0f),
-                        end = Offset(x, size.height),
-                        strokeWidth = 2f,
-                    )
-                }
-                val dotColor = when (m.quality) {
-                    MoveQuality.BLUNDER -> EvalBlunder
-                    MoveQuality.MISTAKE -> EvalMistake
-                    MoveQuality.INACCURACY -> EvalInaccuracy
-                    MoveQuality.BRILLIANT -> EvalBrilliant
-                    MoveQuality.BEST -> EvalBest
-                    else -> null
-                }
-                if (dotColor != null) {
-                    drawCircle(color = dotColor, radius = 5.5f, center = Offset(x, y))
+                reviewedMoves.forEachIndexed { i, m ->
+                    val x = i * stepX
+                    val clamped = m.evalAfterCp.coerceIn(-800, 800)
+                    val y = midY - (clamped / 800f) * (size.height * 0.44f)
+                    if (m.ply == selectedPly) {
+                        drawLine(
+                            color = Color(0xAAFFFFFF),
+                            start = Offset(x, 0f),
+                            end = Offset(x, size.height),
+                            strokeWidth = 2f,
+                        )
+                    }
+                    val dotColor = when (m.quality) {
+                        MoveQuality.BLUNDER -> EvalBlunder
+                        MoveQuality.MISTAKE -> EvalMistake
+                        MoveQuality.INACCURACY -> EvalInaccuracy
+                        MoveQuality.BRILLIANT -> EvalBrilliant
+                        MoveQuality.BEST -> EvalBest
+                        else -> null
+                    }
+                    if (dotColor != null) {
+                        drawCircle(color = dotColor, radius = 5.5f, center = Offset(x, y))
+                    }
                 }
             }
         }
     }
 }
+

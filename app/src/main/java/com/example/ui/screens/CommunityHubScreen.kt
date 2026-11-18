@@ -3,7 +3,6 @@ package com.example.ui.screens
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -17,16 +16,14 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.AdminPanelSettings
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.EmojiEvents
-import androidx.compose.material.icons.filled.Group
-import androidx.compose.material.icons.filled.LiveTv
-import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.CloudUpload
+import androidx.compose.material.icons.filled.Newspaper
 import androidx.compose.material.icons.filled.Report
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -40,7 +37,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.ScrollableTabRow
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -85,6 +81,7 @@ fun CommunityHubScreen(
     settings: AppSettings,
     myProfile: PublicProfileDoc?,
     leaderboardState: UiState<List<PublicProfileDoc>>,
+    playerSearchResults: List<PublicProfileDoc>,
     tournamentsState: UiState<List<TournamentDoc>>,
     selectedTournamentEntries: List<TournamentEntryDoc>,
     clubsState: UiState<List<ClubDoc>>,
@@ -100,6 +97,8 @@ fun CommunityHubScreen(
     adminReports: List<AbuseReportDoc>,
     onRequestSignIn: () -> Unit,
     onOpenSettings: () -> Unit,
+    onOpenNewsReader: () -> Unit,
+    onSearchPlayers: (String) -> Unit,
     onCreateTournament: (String, String, ChessVariant, TimeControl) -> Unit,
     onJoinTournament: (TournamentDoc) -> Unit,
     onSelectTournamentForStandings: (String) -> Unit,
@@ -118,6 +117,8 @@ fun CommunityHubScreen(
     onLoadAdminReports: () -> Unit,
     onResolveReport: (String, String) -> Unit,
     onUpdateProfile: (String, String, String, String, Boolean) -> Unit,
+    onUpdateLocalIdentity: (String, String) -> Unit,
+    onAvatarSelected: (String) -> Unit,
     onLookupExternalPlayer: (String, String) -> Unit,
     onImportExternalPgn: (String) -> Unit,
     onSignOut: () -> Unit,
@@ -137,8 +138,13 @@ fun CommunityHubScreen(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text("ChessHub Community", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-            IconButton(onClick = onOpenSettings, modifier = Modifier.testTag("hub_settings_btn")) {
-                Icon(Icons.Default.Settings, contentDescription = "Settings")
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = onOpenNewsReader, modifier = Modifier.testTag("hub_news_btn")) {
+                    Icon(Icons.Default.Newspaper, contentDescription = "Chess News")
+                }
+                IconButton(onClick = onOpenSettings, modifier = Modifier.testTag("hub_settings_btn")) {
+                    Icon(Icons.Default.Settings, contentDescription = "Settings")
+                }
             }
         }
 
@@ -184,15 +190,18 @@ fun CommunityHubScreen(
                 tvChannels = tvChannels,
                 onSpectateGame = onSpectateGame,
                 onRefresh = onLoadBroadcastsAndTv,
+                onOpenNewsReader = onOpenNewsReader,
             )
             3 -> SocialAndLeaderboardTab(
                 isOnline = isOnline,
                 currentUserId = currentUserId,
                 leaderboardState = leaderboardState,
+                playerSearchResults = playerSearchResults,
                 friendshipsState = friendshipsState,
                 threadsState = threadsState,
                 directMessages = directMessages,
                 onRequestSignIn = onRequestSignIn,
+                onSearchPlayers = onSearchPlayers,
                 onAddFriend = onAddFriend,
                 onAcceptFriend = onAcceptFriend,
                 onBlockFriend = onBlockFriend,
@@ -208,6 +217,8 @@ fun CommunityHubScreen(
                 externalSummary = externalPlayerSummary,
                 onRequestSignIn = onRequestSignIn,
                 onUpdateProfile = onUpdateProfile,
+                onUpdateLocalIdentity = onUpdateLocalIdentity,
+                onAvatarSelected = onAvatarSelected,
                 onLookupExternalPlayer = onLookupExternalPlayer,
                 onImportExternalPgn = onImportExternalPgn,
                 onSignOut = onSignOut,
@@ -470,12 +481,20 @@ private fun WatchAndBroadcastsTab(
     tvChannels: List<ExternalTvChannel>,
     onSpectateGame: (String) -> Unit,
     onRefresh: () -> Unit,
+    onOpenNewsReader: () -> Unit,
 ) {
     LazyColumn(modifier = Modifier.fillMaxSize().padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item {
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 Text("Live Watch & Broadcasts", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                OutlinedButton(onClick = onRefresh) { Text("Refresh") }
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    FilledTonalButton(onClick = onOpenNewsReader) {
+                        Icon(Icons.Default.Newspaper, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("News")
+                    }
+                    OutlinedButton(onClick = onRefresh) { Text("Refresh") }
+                }
             }
         }
         if (isOnline && liveWatchState is UiState.Success && liveWatchState.data.isNotEmpty()) {
@@ -533,10 +552,12 @@ private fun SocialAndLeaderboardTab(
     isOnline: Boolean,
     currentUserId: String?,
     leaderboardState: UiState<List<PublicProfileDoc>>,
+    playerSearchResults: List<PublicProfileDoc>,
     friendshipsState: UiState<List<FriendshipDoc>>,
     threadsState: UiState<List<MessageThreadDoc>>,
     directMessages: List<DirectMessageDoc>,
     onRequestSignIn: () -> Unit,
+    onSearchPlayers: (String) -> Unit,
     onAddFriend: (String, String) -> Unit,
     onAcceptFriend: (String) -> Unit,
     onBlockFriend: (String) -> Unit,
@@ -545,6 +566,7 @@ private fun SocialAndLeaderboardTab(
     onSendDirectMessage: (String, String) -> Unit,
     onOpenReport: (String, String) -> Unit,
 ) {
+    var playerQuery by remember { mutableStateOf("") }
     var countryFilter by remember { mutableStateOf("") }
     var activeChatUid by remember { mutableStateOf<String?>(null) }
     var activeChatName by remember { mutableStateOf("") }
@@ -552,15 +574,53 @@ private fun SocialAndLeaderboardTab(
 
     LazyColumn(modifier = Modifier.fillMaxSize().padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         if (!isOnline || currentUserId == null) {
-            item { SignInRequiredNotice("Global Leaderboards, Friends & Direct Messages", onRequestSignIn) }
+            item { SignInRequiredNotice("Global Leaderboards, Player Search & Messages", onRequestSignIn) }
             return@LazyColumn
         }
+
+        // Global Player Search
+        item {
+            Text("Global Player Search", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(
+                    value = playerQuery,
+                    onValueChange = { playerQuery = it },
+                    label = { Text("Search ChessHub username") },
+                    modifier = Modifier.weight(1f).testTag("player_search_input"),
+                    singleLine = true,
+                )
+                Button(onClick = { onSearchPlayers(playerQuery) }) {
+                    Icon(Icons.Default.Search, contentDescription = "Search")
+                }
+            }
+        }
+        if (playerSearchResults.isNotEmpty()) {
+            items(playerSearchResults, key = { "search_${it.userId}" }) { p ->
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                ) {
+                    Row(modifier = Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("${CountryCatalog.flagForIso(p.countryIso)} ${p.username} (${p.fideFederation})", fontWeight = FontWeight.SemiBold)
+                            Text("Blitz ${p.blitzRating} • Rapid ${p.rapidRating} • Bullet ${p.bulletRating}", style = MaterialTheme.typography.bodySmall)
+                        }
+                        if (p.userId != currentUserId) {
+                            OutlinedButton(onClick = { onAddFriend(p.userId, p.username) }) { Text("Add") }
+                            Spacer(Modifier.width(4.dp))
+                            FilledTonalButton(onClick = { onChallengeFriend(p.userId, p.username, TimeControl.PRESETS[3], ChessVariant.STANDARD) }) { Text("Play") }
+                        }
+                    }
+                }
+            }
+        }
+
         item {
             Text("Friends & Challenges", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
         }
         if (friendshipsState is UiState.Success) {
             if (friendshipsState.data.isEmpty()) {
-                item { Text("Add friends from the Leaderboard below.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                item { Text("Add friends from Search or the Leaderboard below.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
             }
             items(friendshipsState.data, key = { it.id }) { fr ->
                 val isRequester = fr.requesterUid == currentUserId

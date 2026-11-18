@@ -11,6 +11,8 @@ import androidx.room.PrimaryKey
 import androidx.room.Query
 import androidx.room.Room
 import androidx.room.RoomDatabase
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 import kotlinx.coroutines.flow.Flow
 
 @Entity(
@@ -162,6 +164,12 @@ interface ChessHubDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertLessonProgress(progress: LessonProgressEntity)
+
+    @Query("DELETE FROM local_games")
+    suspend fun clearAllLocalGames()
+
+    @Query("DELETE FROM puzzle_attempts")
+    suspend fun clearPuzzleAttempts()
 }
 
 @Database(
@@ -172,16 +180,103 @@ interface ChessHubDao {
         PuzzleAttemptEntity::class,
         CustomPuzzleEntity::class,
         LessonProgressEntity::class,
+        ChessPuzzleEntity::class,
+        MusicTrackEntity::class,
+        CachedNewsEntity::class,
     ],
-    version = 1,
+    version = 2,
     exportSchema = false,
 )
 abstract class ChessHubDatabase : RoomDatabase() {
     abstract fun chessHubDao(): ChessHubDao
+    abstract fun chessPuzzleDao(): ChessPuzzleDao
+    abstract fun mediaAndNewsDao(): MediaAndNewsDao
 
     companion object {
         @Volatile
         private var instance: ChessHubDatabase? = null
+
+        val MIGRATION_1_2: Migration = object : Migration(1, 2) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `chess_puzzles` (
+                        `id` TEXT NOT NULL,
+                        `title` TEXT NOT NULL,
+                        `fen` TEXT NOT NULL,
+                        `solutionMoves` TEXT NOT NULL,
+                        `difficultyRating` INTEGER NOT NULL,
+                        `themes` TEXT NOT NULL,
+                        `hint` TEXT NOT NULL,
+                        `explanation` TEXT NOT NULL,
+                        `isCheckmatePattern` INTEGER NOT NULL,
+                        `patternName` TEXT NOT NULL,
+                        `source` TEXT NOT NULL,
+                        `solvedCount` INTEGER NOT NULL,
+                        `attemptCount` INTEGER NOT NULL,
+                        `bookmarked` INTEGER NOT NULL,
+                        `lastAttemptedAt` INTEGER,
+                        `createdAt` INTEGER NOT NULL,
+                        PRIMARY KEY(`id`)
+                    )
+                    """.trimIndent(),
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_chess_puzzles_difficultyRating` ON `chess_puzzles` (`difficultyRating`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_chess_puzzles_source` ON `chess_puzzles` (`source`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_chess_puzzles_isCheckmatePattern` ON `chess_puzzles` (`isCheckmatePattern`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_chess_puzzles_bookmarked` ON `chess_puzzles` (`bookmarked`)")
+
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `music_tracks` (
+                        `id` TEXT NOT NULL,
+                        `title` TEXT NOT NULL,
+                        `artist` TEXT NOT NULL,
+                        `uriString` TEXT NOT NULL,
+                        `playlistName` TEXT NOT NULL,
+                        `durationMs` INTEGER NOT NULL,
+                        `isBuiltIn` INTEGER NOT NULL DEFAULT 0,
+                        `addedAt` INTEGER NOT NULL,
+                        PRIMARY KEY(`id`)
+                    )
+                    """.trimIndent(),
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_music_tracks_addedAt` ON `music_tracks` (`addedAt`)")
+
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `cached_news` (
+                        `id` TEXT NOT NULL,
+                        `title` TEXT NOT NULL,
+                        `summary` TEXT NOT NULL,
+                        `url` TEXT NOT NULL,
+                        `sourceName` TEXT NOT NULL,
+                        `publishedAt` TEXT NOT NULL,
+                        `category` TEXT NOT NULL,
+                        `fetchedAt` INTEGER NOT NULL,
+                        PRIMARY KEY(`id`)
+                    )
+                    """.trimIndent(),
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_cached_news_fetchedAt` ON `cached_news` (`fetchedAt`)")
+
+                // Preserve any existing custom puzzles created in v1
+                db.execSQL(
+                    """
+                    INSERT OR IGNORE INTO `chess_puzzles` (
+                        `id`, `title`, `fen`, `solutionMoves`, `difficultyRating`, `themes`,
+                        `hint`, `explanation`, `isCheckmatePattern`, `patternName`, `source`,
+                        `solvedCount`, `attemptCount`, `bookmarked`, `lastAttemptedAt`, `createdAt`
+                    )
+                    SELECT `id`, `title`, `fen`, `solutionUci`, `rating`, `theme`,
+                        'Find the best continuation from your analyzed game.',
+                        'Imported from v1 custom puzzles.', 0, '', 'custom',
+                        0, 0, 0, NULL, `createdAt`
+                    FROM `custom_puzzles`
+                    """.trimIndent(),
+                )
+            }
+        }
 
         fun getInstance(context: Context): ChessHubDatabase =
             instance ?: synchronized(this) {
@@ -189,7 +284,10 @@ abstract class ChessHubDatabase : RoomDatabase() {
                     context.applicationContext,
                     ChessHubDatabase::class.java,
                     "chesshub_local.db",
-                ).build().also { instance = it }
+                )
+                    .addMigrations(MIGRATION_1_2)
+                    .build()
+                    .also { instance = it }
             }
     }
 }

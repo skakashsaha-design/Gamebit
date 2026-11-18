@@ -24,6 +24,15 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.tasks.await
 import java.util.UUID
 
+data class RatingDeltaResult(
+    val ratedGame: Boolean,
+    val timeCategory: String,
+    val oldRating: Int,
+    val newRating: Int,
+) {
+    val delta: Int get() = newRating - oldRating
+}
+
 class ChessHubOnlineRepository(
     private val db: FirebaseFirestore,
     private val auth: FirebaseAuth = Firebase.auth,
@@ -135,6 +144,38 @@ class ChessHubOnlineRepository(
         query = db.collection("publicProfiles").whereEqualTo("publicVisible", true).limit(50),
         clazz = PublicProfileDoc::class.java,
     )
+
+    suspend fun searchPublicPlayers(queryText: String): Result<List<PublicProfileDoc>> =
+        runCatchingFirestore(OperationType.LIST, "publicProfiles") {
+            requireUserId()
+            val clean = queryText.trim().lowercase()
+            val snap = db.collection("publicProfiles")
+                .whereEqualTo("publicVisible", true)
+                .limit(100)
+                .get()
+                .await()
+            val all = snap.toObjects(PublicProfileDoc::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
+            if (clean.isBlank()) all.sortedByDescending { it.blitzRating }
+            else all.filter {
+                it.username.lowercase().contains(clean) ||
+                    it.countryIso.lowercase() == clean ||
+                    it.fideFederation.lowercase() == clean
+            }.sortedByDescending { it.blitzRating }
+        }
+
+    suspend fun fetchOpponentRating(opponentUid: String, timeCategory: String): Double = try {
+        if (opponentUid.isBlank()) return 1500.0
+        val doc = db.collection("publicProfiles").document(opponentUid).get().await()
+        val prof = doc.toObject(PublicProfileDoc::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
+        when (timeCategory) {
+            "bullet" -> prof?.bulletRating ?: 1500L
+            "blitz" -> prof?.blitzRating ?: 1500L
+            "rapid" -> prof?.rapidRating ?: 1500L
+            else -> prof?.classicalRating ?: 1500L
+        }.toDouble()
+    } catch (_: Exception) {
+        1500.0
+    }
 
     suspend fun updateProfileIdentity(
         username: String,
@@ -392,7 +433,7 @@ class ChessHubOnlineRepository(
         timeCategory: String,
         opponentRating: Double,
         myScore: Double,
-    ): Result<Unit> = runCatchingFirestore(OperationType.UPDATE, "games/$gameId") {
+    ): Result<RatingDeltaResult?> = runCatchingFirestore(OperationType.UPDATE, "games/$gameId") {
         val uid = requireUserId()
         db.collection("games").document(gameId).update(
             mapOf(
@@ -404,6 +445,7 @@ class ChessHubOnlineRepository(
             ),
         ).await()
 
+        var deltaSummary: RatingDeltaResult? = null
         if (ratedGame && status == "finished") {
             val profileRef = db.collection("publicProfiles").document(uid)
             val snap = profileRef.get().await()
@@ -436,8 +478,22 @@ class ChessHubOnlineRepository(
                         "updatedAt" to FieldValue.serverTimestamp(),
                     ),
                 ).await()
+                deltaSummary = RatingDeltaResult(
+                    ratedGame = true,
+                    timeCategory = timeCategory,
+                    oldRating = currentR.toInt(),
+                    newRating = updated.displayInt,
+                )
             }
+        } else {
+            deltaSummary = RatingDeltaResult(
+                ratedGame = false,
+                timeCategory = timeCategory,
+                oldRating = 0,
+                newRating = 0,
+            )
         }
+        deltaSummary
     }
 
     suspend fun offerDraw(gameId: String): Result<Unit> = runCatchingFirestore(OperationType.UPDATE, "games/$gameId") {

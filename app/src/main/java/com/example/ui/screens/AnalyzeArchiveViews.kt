@@ -63,19 +63,21 @@ fun ArchiveTab(
 ) {
     var searchQuery by remember { mutableStateOf("") }
     var favoritesOnly by remember { mutableStateOf(false) }
+    var selectedModeFilter by remember { mutableStateOf("All") }
     var importText by remember { mutableStateOf("") }
     var importFeedback by remember { mutableStateOf<String?>(null) }
 
-    val filtered = remember(savedGames, searchQuery, favoritesOnly) {
+    val filtered = remember(savedGames, searchQuery, favoritesOnly, selectedModeFilter) {
         savedGames.filter { g ->
             val matchesFav = !favoritesOnly || g.favorite
+            val matchesMode = selectedModeFilter == "All" || g.mode.equals(selectedModeFilter, ignoreCase = true)
             val matchesQuery = searchQuery.isBlank() ||
                 g.whiteName.contains(searchQuery, ignoreCase = true) ||
                 g.blackName.contains(searchQuery, ignoreCase = true) ||
                 g.openingName.contains(searchQuery, ignoreCase = true) ||
                 g.openingEco.contains(searchQuery, ignoreCase = true) ||
                 g.variant.contains(searchQuery, ignoreCase = true)
-            matchesFav && matchesQuery
+            matchesFav && matchesMode && matchesQuery
         }
     }
 
@@ -119,12 +121,33 @@ fun ArchiveTab(
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
             )
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 6.dp)) {
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+                modifier = Modifier.padding(top = 6.dp),
+            ) {
                 FilterChip(
                     selected = favoritesOnly,
                     onClick = { favoritesOnly = !favoritesOnly },
-                    label = { Text("Favorites Only") },
+                    label = { Text("Favorites") },
                 )
+                listOf("All", "vs_bot", "otb", "bot_vs_bot", "online").forEach { mode ->
+                    FilterChip(
+                        selected = selectedModeFilter == mode,
+                        onClick = { selectedModeFilter = mode },
+                        label = {
+                            Text(
+                                when (mode) {
+                                    "vs_bot" -> "Bots"
+                                    "otb" -> "OTB"
+                                    "bot_vs_bot" -> "Bot v Bot"
+                                    "online" -> "Online"
+                                    else -> "All"
+                                },
+                            )
+                        },
+                    )
+                }
             }
         }
 
@@ -160,6 +183,13 @@ fun ArchiveTab(
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
                             )
+                            if (game.whiteAccuracy != null && game.blackAccuracy != null) {
+                                Text(
+                                    "Accuracy: W ${game.whiteAccuracy}% / B ${game.blackAccuracy}%",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.primary,
+                                )
+                            }
                         }
                         IconButton(onClick = { onToggleFavorite(game) }) {
                             Icon(

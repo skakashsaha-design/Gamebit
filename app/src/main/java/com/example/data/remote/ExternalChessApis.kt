@@ -58,6 +58,15 @@ data class ExternalPlayerSummary(
     val recentPgns: List<String>,
 )
 
+data class ExternalChessNewsItem(
+    val id: String,
+    val title: String,
+    val summary: String,
+    val url: String,
+    val publishedAt: String,
+    val source: String = "Lichess Official Blog",
+)
+
 /**
  * Uses ONLY official, unauthenticated public endpoints of Lichess and Chess.com.
  * Respects rate limits and clearly labels external data. Never scrapes private endpoints.
@@ -290,4 +299,78 @@ class ExternalChessApis {
             )
         }
     }
+
+    suspend fun fetchChessNews(): Result<List<ExternalChessNewsItem>> {
+        return getJson("https://lichess.org/blog.atom", accept = "application/atom+xml, application/xml, text/xml")
+            .mapCatching { xml ->
+                val entries = mutableListOf<ExternalChessNewsItem>()
+                val factory = org.xmlpull.v1.XmlPullParserFactory.newInstance()
+                val parser = factory.newPullParser()
+                parser.setInput(java.io.StringReader(xml))
+                var event = parser.eventType
+                var insideEntry = false
+                var currentTag = ""
+                var title = ""
+                var link = ""
+                var id = ""
+                var updated = ""
+                var summary = ""
+
+                while (event != org.xmlpull.v1.XmlPullParser.END_DOCUMENT) {
+                    when (event) {
+                        org.xmlpull.v1.XmlPullParser.START_TAG -> {
+                            currentTag = parser.name ?: ""
+                            if (currentTag == "entry") {
+                                insideEntry = true
+                                title = ""; link = ""; id = ""; updated = ""; summary = ""
+                            } else if (insideEntry && currentTag == "link") {
+                                val href = parser.getAttributeValue(null, "href")
+                                if (!href.isNullOrBlank()) link = href
+                            }
+                        }
+                        org.xmlpull.v1.XmlPullParser.TEXT -> if (insideEntry) {
+                            val txt = parser.text ?: ""
+                            when (currentTag) {
+                                "title" -> title += txt
+                                "id" -> id += txt
+                                "updated", "published" -> if (updated.isBlank()) updated += txt
+                                "summary", "content" -> if (summary.length < 400) summary += txt
+                            }
+                        }
+                        org.xmlpull.v1.XmlPullParser.END_TAG -> {
+                            if (parser.name == "entry" && insideEntry) {
+                                insideEntry = false
+                                val cleanTitle = title.trim()
+                                val cleanSummary = summary
+                                    .replace(Regex("<[^>]*>"), " ")
+                                    .replace("&amp;", "&")
+                                    .replace("&lt;", "<")
+                                    .replace("&gt;", ">")
+                                    .replace("&quot;", "\"")
+                                    .replace(Regex("\\s+"), " ")
+                                    .trim()
+                                    .take(280)
+                                val cleanUrl = link.ifBlank { id }.ifBlank { "https://lichess.org/blog" }
+                                if (cleanTitle.isNotBlank()) {
+                                    entries.add(
+                                        ExternalChessNewsItem(
+                                            id = id.ifBlank { cleanUrl },
+                                            title = cleanTitle,
+                                            summary = cleanSummary.ifBlank { "Read full article on Lichess Blog." },
+                                            url = cleanUrl,
+                                            publishedAt = updated.take(10).ifBlank { "Recent" },
+                                            source = "Lichess Official Blog",
+                                        ),
+                                    )
+                                }
+                            }
+                            currentTag = ""
+                        }
+                    }
+                    event = parser.next()
+                }
+                entries.take(20)
+            }
+    }
 }
+

@@ -21,13 +21,18 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Bookmark
+import androidx.compose.material.icons.filled.BookmarkBorder
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Extension
 import androidx.compose.material.icons.filled.FlipCameraAndroid
 import androidx.compose.material.icons.filled.Lightbulb
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.School
 import androidx.compose.material.icons.filled.Timer
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -39,10 +44,11 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.ScrollableTabRow
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
-import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -62,12 +68,16 @@ import com.example.chess.PieceColor
 import com.example.chess.Square
 import com.example.data.local.AppSettings
 import com.example.data.local.ChessLesson
+import com.example.data.local.ChessPuzzleEntity
 import com.example.data.local.LessonProgressEntity
+import com.example.data.local.OpeningDrill
 import com.example.data.local.PuzzleAttemptEntity
 import com.example.data.local.PuzzlesAndLessonsCatalog
+import com.example.data.local.TacticalPuzzle
 import com.example.ui.components.ChessBoardView
 import com.example.ui.theme.ChessBoardThemes
 import com.example.viewmodel.CoordinateTrainerState
+import com.example.viewmodel.OpeningDrillSessionState
 import com.example.viewmodel.PuzzleMode
 import com.example.viewmodel.PuzzleSessionState
 
@@ -75,16 +85,25 @@ import com.example.viewmodel.PuzzleSessionState
 fun LearnScreen(
     settings: AppSettings,
     puzzleState: PuzzleSessionState,
+    puzzleCollection: List<ChessPuzzleEntity>,
     puzzleAttempts: List<PuzzleAttemptEntity>,
     lessonProgress: List<LessonProgressEntity>,
+    drillState: OpeningDrillSessionState,
     coordState: CoordinateTrainerState,
     onSelectPuzzleMode: (PuzzleMode, String) -> Unit,
     onSelectTheme: (String) -> Unit,
+    onSelectDifficultyBand: (String) -> Unit,
     onSubmitPuzzleMove: (Move) -> Unit,
     onRetryPuzzle: () -> Unit,
     onNextPuzzle: () -> Unit,
     onRevealHint: () -> Unit,
+    onToggleBookmarkPuzzle: () -> Unit,
+    onCreateCustomPuzzle: (String, String, String, Int, String, String, String) -> Boolean,
+    onDeleteCustomPuzzle: (String) -> Unit,
+    onLoadSpecificPuzzle: (TacticalPuzzle) -> Unit,
     onCompleteLessonStep: (ChessLesson, Int) -> Unit,
+    onStartDrill: (OpeningDrill) -> Unit,
+    onSubmitDrillMove: (Move) -> Unit,
     onStartCoordTrainer: (Boolean) -> Unit,
     onTapCoordSquare: (Square) -> Unit,
     onPracticeEndgameInPlay: (String) -> Unit,
@@ -96,33 +115,47 @@ fun LearnScreen(
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
-        TabRow(selectedTabIndex = selectedTab) {
+        ScrollableTabRow(selectedTabIndex = selectedTab, edgePadding = 8.dp) {
             Tab(selected = selectedTab == 0, onClick = { selectedTab = 0 }, text = { Text("Puzzles") })
-            Tab(selected = selectedTab == 1, onClick = { selectedTab = 1 }, text = { Text("Lessons") })
-            Tab(selected = selectedTab == 2, onClick = { selectedTab = 2 }, text = { Text("Endgames") })
-            Tab(selected = selectedTab == 3, onClick = { selectedTab = 3 }, text = { Text("Coords") })
+            Tab(selected = selectedTab == 1, onClick = { selectedTab = 1 }, text = { Text("Opening Drills") })
+            Tab(selected = selectedTab == 2, onClick = { selectedTab = 2 }, text = { Text("Lessons") })
+            Tab(selected = selectedTab == 3, onClick = { selectedTab = 3 }, text = { Text("Endgames") })
+            Tab(selected = selectedTab == 4, onClick = { selectedTab = 4 }, text = { Text("Coords") })
         }
 
         when (selectedTab) {
             0 -> PuzzlesContent(
                 settings = settings,
                 state = puzzleState,
+                puzzleCollection = puzzleCollection,
                 attempts = puzzleAttempts,
                 boardTheme = boardTheme,
                 onSelectMode = onSelectPuzzleMode,
                 onSelectTheme = onSelectTheme,
+                onSelectDifficultyBand = onSelectDifficultyBand,
                 onSubmitMove = onSubmitPuzzleMove,
                 onRetry = onRetryPuzzle,
                 onNext = onNextPuzzle,
                 onHint = onRevealHint,
+                onToggleBookmark = onToggleBookmarkPuzzle,
+                onCreateCustomPuzzle = onCreateCustomPuzzle,
+                onDeleteCustomPuzzle = onDeleteCustomPuzzle,
+                onLoadSpecificPuzzle = onLoadSpecificPuzzle,
             )
-            1 -> LessonsContent(
+            1 -> OpeningDrillsContent(
+                settings = settings,
+                state = drillState,
+                boardTheme = boardTheme,
+                onSelectDrill = onStartDrill,
+                onSubmitMove = onSubmitDrillMove,
+            )
+            2 -> LessonsContent(
                 settings = settings,
                 progressList = lessonProgress,
                 boardTheme = boardTheme,
                 onCompleteStep = onCompleteLessonStep,
             )
-            2 -> EndgamesContent(
+            3 -> EndgamesContent(
                 onPracticeEndgame = onPracticeEndgameInPlay,
             )
             else -> CoordinateTrainerContent(
@@ -141,17 +174,24 @@ fun LearnScreen(
 private fun PuzzlesContent(
     settings: AppSettings,
     state: PuzzleSessionState,
+    puzzleCollection: List<ChessPuzzleEntity>,
     attempts: List<PuzzleAttemptEntity>,
     boardTheme: com.example.ui.theme.BoardThemeColors,
     onSelectMode: (PuzzleMode, String) -> Unit,
     onSelectTheme: (String) -> Unit,
+    onSelectDifficultyBand: (String) -> Unit,
     onSubmitMove: (Move) -> Unit,
     onRetry: () -> Unit,
     onNext: () -> Unit,
     onHint: () -> Unit,
+    onToggleBookmark: () -> Unit,
+    onCreateCustomPuzzle: (String, String, String, Int, String, String, String) -> Boolean,
+    onDeleteCustomPuzzle: (String) -> Unit,
+    onLoadSpecificPuzzle: (TacticalPuzzle) -> Unit,
 ) {
     var themeSearch by remember { mutableStateOf("") }
     var showDashboard by remember { mutableStateOf(false) }
+    var showCreateDialog by remember { mutableStateOf(false) }
 
     val hintArrows = remember(state.showHint, state.currentPuzzle.id, state.solutionIndex) {
         if (!state.showHint) emptyList()
@@ -187,7 +227,7 @@ private fun PuzzlesContent(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Column {
+                Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = "${state.currentPuzzle.title} (${state.currentPuzzle.rating})",
                         style = MaterialTheme.typography.titleSmall,
@@ -196,12 +236,24 @@ private fun PuzzlesContent(
                     val meta = when (state.mode) {
                         PuzzleMode.STREAK -> "Streak: ${state.streakCount} (Best ${settings.puzzleBestStreak})"
                         PuzzleMode.STORM, PuzzleMode.RACER -> "Score: ${state.stormScore} • ${state.stormRemainingSec}s left"
-                        else -> "Your Puzzle Rating: ${settings.localPuzzleRating}"
+                        else -> "Your Puzzle Rating: ${settings.localPuzzleRating} • Library: ${puzzleCollection.size.coerceAtLeast(PuzzlesAndLessonsCatalog.OFFLINE_PUZZLES.size)}"
                     }
                     Text(meta, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                OutlinedButton(onClick = { showDashboard = !showDashboard }) {
-                    Text(if (showDashboard) "Board" else "Stats")
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(onClick = onToggleBookmark, modifier = Modifier.testTag("puzzle_bookmark_btn")) {
+                        Icon(
+                            imageVector = if (state.isCurrentBookmarked) Icons.Default.Bookmark else Icons.Default.BookmarkBorder,
+                            contentDescription = if (state.isCurrentBookmarked) "Remove Bookmark" else "Bookmark Puzzle",
+                            tint = if (state.isCurrentBookmarked) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    IconButton(onClick = { showCreateDialog = true }, modifier = Modifier.testTag("create_puzzle_btn")) {
+                        Icon(Icons.Default.Add, contentDescription = "Create Custom Puzzle")
+                    }
+                    OutlinedButton(onClick = { showDashboard = !showDashboard }) {
+                        Text(if (showDashboard) "Board" else "Stats")
+                    }
                 }
             }
         }
@@ -226,6 +278,10 @@ private fun PuzzlesContent(
                         showLegalMoves = settings.showLegalMoves,
                         showLastMove = settings.showLastMove,
                         autoQueen = settings.autoQueen,
+                        pieceStyleId = settings.pieceStyleId,
+                        moveAnimation = settings.moveAnimation,
+                        reducedAnimations = settings.reducedAnimations,
+                        animationSpeed = settings.animationSpeed,
                         arrows = hintArrows,
                         onMoveSelected = onSubmitMove,
                     )
@@ -271,11 +327,86 @@ private fun PuzzlesContent(
                 }
             }
 
+            // Difficulty Band filter chips
+            item {
+                Text("Difficulty Rating Band", style = MaterialTheme.typography.labelMedium)
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    listOf("All", "<1000", "1000-1399", "1400+").forEach { band ->
+                        FilterChip(
+                            selected = state.selectedDifficultyBand == band,
+                            onClick = { onSelectDifficultyBand(band) },
+                            label = { Text(band) },
+                        )
+                    }
+                }
+            }
+
+            // 20 Checkmate Pattern Library selector when in CHECKMATE_PATTERNS mode
+            if (state.mode == PuzzleMode.CHECKMATE_PATTERNS) {
+                item {
+                    Text(
+                        "20 Classic Checkmate Patterns",
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        PuzzlesAndLessonsCatalog.CHECKMATE_PATTERN_NAMES.forEach { pattern ->
+                            FilterChip(
+                                selected = state.currentPuzzle.patternName == pattern,
+                                onClick = { onSelectTheme(pattern) },
+                                label = { Text(pattern) },
+                            )
+                        }
+                    }
+                }
+            }
+
+            // Custom / Mistake Puzzles manager list
+            val customOrSaved = puzzleCollection.filter {
+                (state.mode == PuzzleMode.MISTAKES && (it.source == "custom" || it.source == "mistake")) ||
+                    (state.mode == PuzzleMode.BOOKMARKS && it.bookmarked)
+            }
+            if (customOrSaved.isNotEmpty()) {
+                item {
+                    Text(
+                        if (state.mode == PuzzleMode.BOOKMARKS) "Bookmarked Puzzles (${customOrSaved.size})" else "My Custom & Mistake Puzzles (${customOrSaved.size})",
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
+                items(customOrSaved, key = { it.id }) { entity ->
+                    Card(
+                        modifier = Modifier.fillMaxWidth().clickable { onLoadSpecificPuzzle(entity.toTacticalPuzzle()) },
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("${entity.title} (${entity.difficultyRating})", fontWeight = FontWeight.SemiBold)
+                                Text(
+                                    "${entity.themes} • Solved ${entity.solvedCount}/${entity.attemptCount}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                            if (entity.source == "custom" || entity.source == "mistake") {
+                                IconButton(onClick = { onDeleteCustomPuzzle(entity.id) }) {
+                                    Icon(Icons.Default.Delete, contentDescription = "Delete puzzle")
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
             item {
                 OutlinedTextField(
                     value = themeSearch,
                     onValueChange = { themeSearch = it },
-                    label = { Text("Filter Tactical Themes (16)") },
+                    label = { Text("Filter Tactical Themes (17)") },
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true,
                 )
@@ -293,6 +424,138 @@ private fun PuzzlesContent(
                     }
                 }
                 Spacer(Modifier.height(14.dp))
+            }
+        }
+    }
+
+    if (showCreateDialog) {
+        CreateCustomPuzzleDialog(
+            defaultFen = state.boardState.toFen(),
+            onDismiss = { showCreateDialog = false },
+            onSave = { title, fen, sol, rating, theme, hint ->
+                val ok = onCreateCustomPuzzle(title, fen, sol, rating, theme, hint, "Custom user-authored puzzle.")
+                if (ok) showCreateDialog = false
+                ok
+            },
+        )
+    }
+}
+
+@Composable
+private fun CreateCustomPuzzleDialog(
+    defaultFen: String,
+    onDismiss: () -> Unit,
+    onSave: (String, String, String, Int, String, String) -> Boolean,
+) {
+    var title by remember { mutableStateOf("") }
+    var fen by remember { mutableStateOf(defaultFen) }
+    var solutionUci by remember { mutableStateOf("") }
+    var ratingText by remember { mutableStateOf("1250") }
+    var theme by remember { mutableStateOf("Tactics") }
+    var hint by remember { mutableStateOf("") }
+    var errorMsg by remember { mutableStateOf<String?>(null) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Create Custom Puzzle") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(value = title, onValueChange = { title = it }, label = { Text("Title") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(value = fen, onValueChange = { fen = it; errorMsg = null }, label = { Text("FEN Position") }, modifier = Modifier.fillMaxWidth(), maxLines = 2)
+                OutlinedTextField(value = solutionUci, onValueChange = { solutionUci = it; errorMsg = null }, label = { Text("Solution UCI (e.g. d5f7 g8h8)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(value = ratingText, onValueChange = { ratingText = it.filter { c -> c.isDigit() } }, label = { Text("Rating") }, singleLine = true, modifier = Modifier.weight(1f))
+                    OutlinedTextField(value = theme, onValueChange = { theme = it }, label = { Text("Theme") }, singleLine = true, modifier = Modifier.weight(1f))
+                }
+                OutlinedTextField(value = hint, onValueChange = { hint = it }, label = { Text("Hint (optional)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                errorMsg?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
+            }
+        },
+        confirmButton = {
+            Button(onClick = {
+                val ok = onSave(
+                    title,
+                    fen,
+                    solutionUci,
+                    ratingText.toIntOrNull() ?: 1250,
+                    theme,
+                    hint,
+                )
+                if (!ok) errorMsg = "Enter a valid FEN and at least one UCI solution move."
+            }) { Text("Save Puzzle") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}
+
+@Composable
+private fun OpeningDrillsContent(
+    settings: AppSettings,
+    state: OpeningDrillSessionState,
+    boardTheme: com.example.ui.theme.BoardThemeColors,
+    onSelectDrill: (OpeningDrill) -> Unit,
+    onSubmitMove: (Move) -> Unit,
+) {
+    LazyColumn(
+        modifier = Modifier.fillMaxSize().padding(14.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        item {
+            Text("Opening & Gambit Repertoire Drills", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            Text(
+                "${state.drill.title} (${state.drill.eco}) • Play for ${state.drill.side}",
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.primary,
+            )
+        }
+        item {
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                items(PuzzlesAndLessonsCatalog.OPENING_DRILLS, key = { it.id }) { drill ->
+                    FilterChip(
+                        selected = state.drill.id == drill.id,
+                        onClick = { onSelectDrill(drill) },
+                        label = { Text(if (drill.isGambit) "${drill.title} (Gambit)" else drill.title) },
+                    )
+                }
+            }
+        }
+        item {
+            val sideColor = if (state.drill.side.equals("Black", ignoreCase = true)) PieceColor.BLACK else PieceColor.WHITE
+            Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                ChessBoardView(
+                    state = state.boardState,
+                    legalMoves = state.legalMoves,
+                    theme = boardTheme,
+                    modifier = Modifier.widthIn(max = 480.dp),
+                    flipped = sideColor == PieceColor.BLACK,
+                    interactive = !state.completed,
+                    allowBothSides = false,
+                    humanSide = sideColor,
+                    showCoordinates = settings.showCoordinates,
+                    showLegalMoves = settings.showLegalMoves,
+                    showLastMove = settings.showLastMove,
+                    autoQueen = settings.autoQueen,
+                    pieceStyleId = settings.pieceStyleId,
+                    moveAnimation = settings.moveAnimation,
+                    reducedAnimations = settings.reducedAnimations,
+                    animationSpeed = settings.animationSpeed,
+                    onMoveSelected = onSubmitMove,
+                )
+            }
+        }
+        item {
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(10.dp),
+                color = if (state.completed) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
+            ) {
+                Text(state.feedback, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(12.dp))
+            }
+            Spacer(Modifier.height(6.dp))
+            OutlinedButton(onClick = { onSelectDrill(state.drill) }, modifier = Modifier.fillMaxWidth()) {
+                Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
+                Spacer(Modifier.width(6.dp))
+                Text("Reset Drill")
             }
         }
     }
@@ -419,6 +682,10 @@ private fun LessonsContent(
                         humanSide = boardState.sideToMove,
                         showCoordinates = settings.showCoordinates,
                         showLegalMoves = settings.showLegalMoves,
+                        pieceStyleId = settings.pieceStyleId,
+                        moveAnimation = settings.moveAnimation,
+                        reducedAnimations = settings.reducedAnimations,
+                        animationSpeed = settings.animationSpeed,
                         onMoveSelected = { move ->
                             if (move.uci == step.expectedMoveUci) {
                                 onCompleteStep(lesson, stepIdx)
@@ -546,6 +813,7 @@ private fun CoordinateTrainerContent(
                 interactive = state.active,
                 showCoordinates = false,
                 showLegalMoves = false,
+                pieceStyleId = settings.pieceStyleId,
                 onSquareTappedRaw = onTapSquare,
             )
         }

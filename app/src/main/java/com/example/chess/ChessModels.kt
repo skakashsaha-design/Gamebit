@@ -212,17 +212,46 @@ data class BotProfile(
     val styleTag: String,
     val bio: String,
     val preferredOpeningEco: String,
-)
+) {
+    fun dialogueFor(event: String, moveCount: Int): String = when (event) {
+        "start" -> when {
+            approxElo < 800 -> "Hi! I'm $name ($approxStrengthLabel). Let's have a fun relaxed game!"
+            approxElo < 1800 -> "Good luck! I'll stick to my $styleTag plans ($preferredOpeningEco)."
+            else -> "$name ready. Expect sharp calculation and disciplined $styleTag pressure."
+        }
+        "capture" -> when (styleTag) {
+            "Aggressive", "Sharp" -> "Keeping the tension high—let's see how you defend!"
+            "Endgame" -> "Simplifying toward a favorable endgame structure."
+            else -> "Fair trade! Staying focused on piece activity."
+        }
+        "check" -> "Check! Guard your king carefully."
+        "blunder_opp" -> "Hmm, that square looked tempting—let's test it!"
+        "win" -> "Good game! Want to run Game Review together to inspect key moments?"
+        "lose" -> "Well played! You broke through my defense cleanly."
+        else -> if (moveCount < 8) "Developing my pieces toward the center." else "Calculating candidate continuations..."
+    }
+}
 
 object ChessHubBots {
     val ALL = listOf(
         BotProfile("bot_sprout", "Nadia", "Approx. 250 Bot", 250, 1, 240, 0.8f, 0.9f, "Beginner", "Learns alongside you and frequently leaves tactical chances.", "A00"),
-        BotProfile("bot_tempo", "Tariq", "Approx. 650 Bot", 650, 1, 130, 1.0f, 0.7f, "Casual", "Loves developing knights early and trading queens.", "C20"),
-        BotProfile("bot_club", "Sadia", "Approx. 1050 Bot", 1050, 2, 75, 1.1f, 0.5f, "Tactical", "Spots basic forks and back-rank mates reliably.", "C50"),
+        BotProfile("bot_novice", "Leo", "Approx. 450 Bot", 450, 1, 180, 0.95f, 0.8f, "Novice", "Likes early queen sorties and captures hanging pawns.", "B00"),
+        BotProfile("bot_tempo", "Tariq", "Approx. 650 Bot", 650, 1, 130, 1.0f, 0.7f, "Casual", "Loves developing knights early and trading pieces.", "C20"),
+        BotProfile("bot_improver", "Maya", "Approx. 850 Bot", 850, 1, 100, 1.05f, 0.6f, "Improver", "Castles early and follows basic central development.", "C50"),
+        BotProfile("bot_club", "Sadia", "Approx. 1050 Bot", 1050, 2, 75, 1.1f, 0.5f, "Tactical", "Spots basic forks, skewers, and back-rank mates reliably.", "C44"),
+        BotProfile("bot_tactical", "Victor", "Approx. 1220 Bot", 1220, 2, 55, 1.2f, 0.42f, "Tactical", "Enjoys open files and double attacks on unguarded targets.", "B21"),
         BotProfile("bot_positional", "Henrik", "Approx. 1400 Bot", 1400, 2, 35, 0.9f, 0.35f, "Positional", "Solid center control, London System and Queen's Gambit specialist.", "D02"),
-        BotProfile("bot_sharpshooter", "Mateo", "Approx. 1750 Bot", 1750, 3, 18, 1.3f, 0.25f, "Aggressive", "Pushes kingside attacks and sharp Sicilian lines.", "B90"),
-        BotProfile("bot_master", "Aarav", "Approx. 2100 Bot", 2100, 4, 6, 1.15f, 0.15f, "Master", "Deep calculation and disciplined endgame technique.", "C88"),
-        BotProfile("bot_apex", "Apex-CH", "Approx. 2400 Bot", 2400, 5, 0, 1.05f, 0.05f, "Engine", "Maximum local search depth with minimal randomness.", "E60"),
+        BotProfile("bot_solid", "Elena", "Approx. 1550 Bot", 1550, 2, 26, 0.92f, 0.30f, "Defensive", "Patient Slav and Caro-Kann defender who punishes overextension.", "B10"),
+        BotProfile("bot_sharpshooter", "Mateo", "Approx. 1750 Bot", 1750, 3, 18, 1.3f, 0.25f, "Aggressive", "Pushes kingside attacks, Evans Gambit, and sharp Sicilian lines.", "B90"),
+        BotProfile("bot_sharp", "Sofia", "Approx. 1900 Bot", 1900, 3, 14, 1.28f, 0.22f, "Sharp", "Plays imbalanced Benoni and King's Indian counterattacks.", "E60"),
+        BotProfile("bot_defender", "Kenji", "Approx. 1980 Bot", 1980, 3, 10, 0.85f, 0.20f, "Defensive", "Neutralizes gambits with accurate consolidation.", "D30"),
+        BotProfile("bot_balanced", "Clara", "Approx. 2050 Bot", 2050, 3, 8, 1.02f, 0.18f, "Balanced", "Classical Ruy Lopez & Catalan player balancing strategy and tactics.", "E00"),
+        BotProfile("bot_master", "Aarav", "Approx. 2150 Bot", 2150, 4, 6, 1.12f, 0.15f, "Master", "Deep calculation and disciplined positional squeezing.", "C88"),
+        BotProfile("bot_endgame", "Soren", "Approx. 2250 Bot", 2250, 4, 4, 0.95f, 0.12f, "Endgame", "Relentlessly trades into favorable rook and pawn endings.", "D37"),
+        BotProfile("bot_im", "Ananya", "Approx. 2450 Bot", 2450, 4, 3, 1.10f, 0.10f, "Master", "International Master style tactical precision and theory.", "B96"),
+        BotProfile("bot_gm", "Vikram", "Approx. 2650 Bot", 2650, 4, 1, 1.15f, 0.08f, "Grandmaster", "Combines dynamic sacrifices with rock-solid structure.", "C89"),
+        BotProfile("bot_supergm", "Ren", "Approx. 2850 Bot", 2850, 5, 0, 1.08f, 0.06f, "Grandmaster", "Relentless initiative and razor-sharp multi-move tactics.", "C78"),
+        BotProfile("bot_apex", "Apex-CH", "Approx. 3000 Bot", 3000, 5, 0, 1.05f, 0.03f, "Engine", "Maximum local Kotlin alpha-beta depth with minimal randomness.", "E90"),
     )
 }
 

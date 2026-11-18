@@ -123,4 +123,31 @@ val ChessBoardThemes: List<BoardThemeColors> = listOf(
         premoveSquare = Color(0xCC38BDF8),
         checkHighlight = Color(0xFFFF0000),
     ),
+    BoardThemeColors(
+        id = "colorblind",
+        displayName = "Colorblind Safe",
+        lightSquare = Color(0xFFF4F1E8),
+        darkSquare = Color(0xFF3E6C9B),
+        selectedSquare = Color(0xCCF59E0B),
+        lastMoveLight = Color(0xAAFB923C),
+        lastMoveDark = Color(0xAAEA580C),
+        premoveSquare = Color(0xAA22D3EE),
+        checkHighlight = Color(0xFFD946EF),
+    ),
 )
+
+data class PieceStyleOption(
+    val id: String,
+    val displayName: String,
+    val description: String,
+)
+
+val ChessPieceStyles: List<PieceStyleOption> = listOf(
+    PieceStyleOption("classic", "Classic Staunton", "Traditional ivory and dark slate pieces"),
+    PieceStyleOption("modern", "Modern", "Sleek cool-silver and carbon silhouettes"),
+    PieceStyleOption("minimal", "Minimal", "Clean flat high-legibility geometry"),
+    PieceStyleOption("wooden", "Wooden", "Warm maple & rosewood tones"),
+    PieceStyleOption("high_contrast", "High Contrast", "Maximum black/white border contrast"),
+    PieceStyleOption("3d", "3D Bevel", "Layered drop-shadow & rim depth"),
+)
+

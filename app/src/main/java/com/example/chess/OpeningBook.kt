@@ -26,7 +26,129 @@ data class BookMoveStat(
     val openingName: String,
 )
 
+data class GambitInfo(
+    val name: String,
+    val eco: String,
+    val side: String, // "White Gambit" or "Black Gambit"
+    val acceptedLineUci: List<String>,
+    val declinedLineUci: List<String> = emptyList(),
+    val offerLineUci: List<String>,
+    val recommendedIdeas: String,
+)
+
+data class GambitMatch(
+    val name: String,
+    val eco: String,
+    val status: String, // "Offered", "Accepted", "Declined"
+    val side: String,
+    val recommendedIdeas: String,
+)
+
 object OpeningBook {
+    val NAMED_GAMBITS = listOf(
+        GambitInfo(
+            name = "King's Gambit",
+            eco = "C30",
+            side = "White Gambit",
+            offerLineUci = listOf("e2e4", "e7e5", "f2f4"),
+            acceptedLineUci = listOf("e2e4", "e7e5", "f2f4", "e5f4"),
+            declinedLineUci = listOf("e2e4", "e7e5", "f2f4", "f8c5"),
+            recommendedIdeas = "Open the f-file for kingside pressure, push d4, and develop Nf3 before striking f4.",
+        ),
+        GambitInfo(
+            name = "Queen's Gambit",
+            eco = "D06",
+            side = "White Gambit",
+            offerLineUci = listOf("d2d4", "d7d5", "c2c4"),
+            acceptedLineUci = listOf("d2d4", "d7d5", "c2c4", "d5c4"),
+            declinedLineUci = listOf("d2d4", "d7d5", "c2c4", "e7e6"),
+            recommendedIdeas = "Challenge Black's d5 pawn, gain central space with e3/e4, and activate dark-squared Bishop.",
+        ),
+        GambitInfo(
+            name = "Evans Gambit",
+            eco = "C51",
+            side = "White Gambit",
+            offerLineUci = listOf("e2e4", "e7e5", "g1f3", "b8c6", "f1c4", "f8c5", "b2b4"),
+            acceptedLineUci = listOf("e2e4", "e7e5", "g1f3", "b8c6", "f1c4", "f8c5", "b2b4", "c5b4"),
+            declinedLineUci = listOf("e2e4", "e7e5", "g1f3", "b8c6", "f1c4", "f8c5", "b2b4", "c5b6"),
+            recommendedIdeas = "Sacrifice the b4 pawn for rapid c3-d4 central expansion and a deadly attack on f7.",
+        ),
+        GambitInfo(
+            name = "Danish Gambit",
+            eco = "C21",
+            side = "White Gambit",
+            offerLineUci = listOf("e2e4", "e7e5", "d2d4", "e5d4", "c2c3"),
+            acceptedLineUci = listOf("e2e4", "e7e5", "d2d4", "e5d4", "c2c3", "d4c3"),
+            declinedLineUci = listOf("e2e4", "e7e5", "d2d4", "e5d4", "c2c3", "d7d5"),
+            recommendedIdeas = "Trade one or two pawns to place twin Bishops on c4 and b2 aiming straight at Black's kingside.",
+        ),
+        GambitInfo(
+            name = "Smith-Morra Gambit",
+            eco = "B21",
+            side = "White Gambit",
+            offerLineUci = listOf("e2e4", "c7c5", "d2d4", "c5d4", "c2c3"),
+            acceptedLineUci = listOf("e2e4", "c7c5", "d2d4", "c5d4", "c2c3", "d4c3"),
+            declinedLineUci = listOf("e2e4", "c7c5", "d2d4", "c5d4", "c2c3", "d4d3"),
+            recommendedIdeas = "Recapture with Nxc3, put Rooks on open c/d files, and launch rapid piece pressure against d6/e6.",
+        ),
+        GambitInfo(
+            name = "Benko Gambit",
+            eco = "A57",
+            side = "Black Gambit",
+            offerLineUci = listOf("d2d4", "g8f6", "c2c4", "c7c5", "d4d5", "b7b5"),
+            acceptedLineUci = listOf("d2d4", "g8f6", "c2c4", "c7c5", "d4d5", "b7b5", "c4b5", "a7a6"),
+            recommendedIdeas = "Open the a- and b-files for Black's Rooks and fianchettoed g7 Bishop for lasting endgame compensation.",
+        ),
+        GambitInfo(
+            name = "Budapest Gambit",
+            eco = "A52",
+            side = "Black Gambit",
+            offerLineUci = listOf("d2d4", "g8f6", "c2c4", "e7e5"),
+            acceptedLineUci = listOf("d2d4", "g8f6", "c2c4", "e7e5", "d4e5", "f6g4"),
+            recommendedIdeas = "Counterattack e5 immediately with Ng4/Nc6 and target White's overextended light squares.",
+        ),
+        GambitInfo(
+            name = "Englund Gambit",
+            eco = "A40",
+            side = "Black Gambit",
+            offerLineUci = listOf("d2d4", "e7e5"),
+            acceptedLineUci = listOf("d2d4", "e7e5", "d4e5"),
+            recommendedIdeas = "Create practical tactical complications with Qe7/Nc6/Qb4+ against unprepared d4 players.",
+        ),
+        GambitInfo(
+            name = "Stafford Gambit",
+            eco = "C42",
+            side = "Black Gambit",
+            offerLineUci = listOf("e2e4", "e7e5", "g1f3", "g8f6", "f3e5", "b8c6"),
+            acceptedLineUci = listOf("e2e4", "e7e5", "g1f3", "g8f6", "f3e5", "b8c6", "e5c6", "d7c6"),
+            recommendedIdeas = "Open the d-file and c8-h3 diagonal rapidly; watch out for Bc5, Ng4, and Qh4 traps.",
+        ),
+        GambitInfo(
+            name = "Marshall Attack",
+            eco = "C89",
+            side = "Black Gambit",
+            offerLineUci = listOf("e2e4", "e7e5", "g1f3", "b8c6", "f1b5", "a7a6", "f1a4", "g8f6", "e1g1", "f8e7", "f1e1", "b7b5", "a4b3", "e8g8", "c2c3", "d7d5"),
+            acceptedLineUci = listOf("e2e4", "e7e5", "g1f3", "b8c6", "f1b5", "a7a6", "f1a4", "g8f6", "e1g1", "f8e7", "f1e1", "b7b5", "a4b3", "e8g8", "c2c3", "d7d5", "e4d5", "f6d5", "f3e5"),
+            recommendedIdeas = "Sacrifice the e5 pawn for ferocious dark-square attacks on the kingside (c6, Bd6, Qh4).",
+        ),
+        GambitInfo(
+            name = "Scotch Gambit",
+            eco = "C44",
+            side = "White Gambit",
+            offerLineUci = listOf("e2e4", "e7e5", "g1f3", "b8c6", "d2d4", "e5d4", "f1c4"),
+            acceptedLineUci = listOf("e2e4", "e7e5", "g1f3", "b8c6", "d2d4", "e5d4", "f1c4", "f8c5", "c2c3"),
+            recommendedIdeas = "Castle early and attack f7 and the center rather than recapturing d4 immediately.",
+        ),
+        GambitInfo(
+            name = "Blackmar-Diemer Gambit",
+            eco = "D00",
+            side = "White Gambit",
+            offerLineUci = listOf("d2d4", "d7d5", "e2e4", "d5e4", "b1c3"),
+            acceptedLineUci = listOf("d2d4", "d7d5", "e2e4", "d5e4", "b1c3", "g8f6", "f2f3"),
+            recommendedIdeas = "Follow up with f3 to blast open the f-file and launch a fast kingside assault.",
+        ),
+    )
+
     private val RAW_OPENINGS = listOf(
         Triple("A00", "Polish Opening", "b2b4"),
         Triple("A00", "Hungarian Opening", "g2g3"),
@@ -40,6 +162,7 @@ object OpeningBook {
         Triple("A20", "English Opening: King's English", "c2c4 e7e5"),
         Triple("A22", "English Opening: Bremen System", "c2c4 e7e5 b1c3 g8f6"),
         Triple("A40", "Queen's Pawn Game", "d2d4"),
+        Triple("A40", "Englund Gambit", "d2d4 e7e5"),
         Triple("A45", "Trompowsky Attack", "d2d4 g8f6 c1g5"),
         Triple("A46", "Torre Attack", "d2d4 g8f6 g1f3 e7e6 c1g5"),
         Triple("A52", "Budapest Gambit", "d2d4 g8f6 c2c4 e7e5"),
@@ -75,15 +198,20 @@ object OpeningBook {
         Triple("C11", "French Defense: Classical System", "e2e4 e7e6 d2d4 d7d5 b1c3 g8f6"),
         Triple("C18", "French Defense: Winawer Variation", "e2e4 e7e6 d2d4 d7d5 b1c3 f8b4"),
         Triple("C20", "King's Pawn Game: Open Game", "e2e4 e7e5"),
+        Triple("C21", "Center Game: Danish Gambit", "e2e4 e7e5 d2d4 e5d4 c2c3"),
         Triple("C23", "Bishop's Opening", "e2e4 e7e5 f1c4"),
         Triple("C25", "Vienna Game", "e2e4 e7e5 b1c3"),
         Triple("C30", "King's Gambit", "e2e4 e7e5 f2f4"),
+        Triple("C33", "King's Gambit Accepted", "e2e4 e7e5 f2f4 e5f4"),
         Triple("C41", "Philidor Defense", "e2e4 e7e5 g1f3 d7d6"),
         Triple("C42", "Petrov's Defense", "e2e4 e7e5 g1f3 g8f6"),
+        Triple("C42", "Petrov: Stafford Gambit", "e2e4 e7e5 g1f3 g8f6 f3e5 b8c6"),
         Triple("C44", "Scotch Game", "e2e4 e7e5 g1f3 b8c6 d2d4"),
+        Triple("C44", "Scotch Gambit", "e2e4 e7e5 g1f3 b8c6 d2d4 e5d4 f1c4"),
         Triple("C46", "Three Knights / Four Knights", "e2e4 e7e5 g1f3 b8c6 b1c3"),
         Triple("C47", "Four Knights Game", "e2e4 e7e5 g1f3 b8c6 b1c3 g8f6"),
         Triple("C50", "Italian Game", "e2e4 e7e5 g1f3 b8c6 f1c4"),
+        Triple("C51", "Italian Game: Evans Gambit", "e2e4 e7e5 g1f3 b8c6 f1c4 f8c5 b2b4"),
         Triple("C53", "Italian Game: Giuoco Piano", "e2e4 e7e5 g1f3 b8c6 f1c4 f8c5 c2c3"),
         Triple("C55", "Italian Game: Two Knights Defense", "e2e4 e7e5 g1f3 b8c6 f1c4 g8f6"),
         Triple("C60", "Ruy Lopez", "e2e4 e7e5 g1f3 b8c6 f1b5"),
@@ -93,6 +221,7 @@ object OpeningBook {
         Triple("C88", "Ruy Lopez: Closed", "e2e4 e7e5 g1f3 b8c6 f1b5 a7a6 f1a4 g8f6 e1g1 f8e7"),
         Triple("C89", "Ruy Lopez: Marshall Attack", "e2e4 e7e5 g1f3 b8c6 f1b5 a7a6 f1a4 g8f6 e1g1 f8e7 f1e1 b7b5 a4b3 e8g8 c2c3 d7d5"),
         Triple("D00", "Queen's Pawn: Closed Game", "d2d4 d7d5"),
+        Triple("D00", "Blackmar-Diemer Gambit", "d2d4 d7d5 e2e4 d5e4 b1c3"),
         Triple("D02", "London System", "d2d4 d7d5 g1f3 g8f6 c1f4"),
         Triple("D06", "Queen's Gambit", "d2d4 d7d5 c2c4"),
         Triple("D10", "Slav Defense", "d2d4 d7d5 c2c4 c7c6"),
@@ -157,6 +286,38 @@ object OpeningBook {
         }
     }
 
+    fun recognizeGambit(playedUciMoves: List<String>): GambitMatch? {
+        if (playedUciMoves.isEmpty()) return null
+        for (g in NAMED_GAMBITS.sortedByDescending { it.offerLineUci.size }) {
+            if (g.acceptedLineUci.isNotEmpty() &&
+                playedUciMoves.size >= g.acceptedLineUci.size &&
+                playedUciMoves.subList(0, g.acceptedLineUci.size) == g.acceptedLineUci
+            ) {
+                return GambitMatch(g.name, g.eco, "Accepted", g.side, g.recommendedIdeas)
+            }
+            if (g.declinedLineUci.isNotEmpty() &&
+                playedUciMoves.size >= g.declinedLineUci.size &&
+                playedUciMoves.subList(0, g.declinedLineUci.size) == g.declinedLineUci
+            ) {
+                return GambitMatch(g.name, g.eco, "Declined", g.side, g.recommendedIdeas)
+            }
+            if (playedUciMoves.size >= g.offerLineUci.size &&
+                playedUciMoves.subList(0, g.offerLineUci.size) == g.offerLineUci
+            ) {
+                return GambitMatch(g.name, g.eco, "Offered", g.side, g.recommendedIdeas)
+            }
+        }
+        return null
+    }
+
+    fun isBookMove(playedUciMovesBefore: List<String>, moveUci: String): Boolean {
+        return ENTRIES.any { entry ->
+            entry.movesUci.size > playedUciMovesBefore.size &&
+                entry.movesUci.subList(0, playedUciMovesBefore.size) == playedUciMovesBefore &&
+                entry.movesUci[playedUciMovesBefore.size] == moveUci
+        }
+    }
+
     fun getLocalBookMoves(state: ChessBoardState, playedUciMoves: List<String>): List<BookMoveStat> {
         val legal = MoveGenerator.legalMoves(state)
         val nextMoveMap = linkedMapOf<String, MutableList<OpeningEntry>>()
@@ -191,3 +352,4 @@ object OpeningBook {
         }.sortedByDescending { it.games }
     }
 }
+

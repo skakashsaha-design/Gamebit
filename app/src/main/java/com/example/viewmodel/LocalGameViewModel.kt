@@ -4,12 +4,16 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.audio.ChessSoundType
 import com.example.audio.SoundAndHapticsManager
+import com.example.audio.VoiceCoachManager
 import com.example.chess.BotProfile
 import com.example.chess.ChessBoardState
 import com.example.chess.ChessEngine
 import com.example.chess.ChessHubBots
 import com.example.chess.ChessVariant
 import com.example.chess.ClockType
+import com.example.chess.EndgameClassification
+import com.example.chess.EndgameClassifier
+import com.example.chess.GambitMatch
 import com.example.chess.GameStatus
 import com.example.chess.Move
 import com.example.chess.MoveGenerator
@@ -35,6 +39,7 @@ import java.util.UUID
 enum class PlayMode {
     PASS_AND_PLAY,
     VS_BOT,
+    BOT_VS_BOT,
 }
 
 data class LocalGameUiState(
@@ -44,6 +49,8 @@ data class LocalGameUiState(
     val timeControl: TimeControl = TimeControl.PRESETS[5],
     val humanColor: PieceColor = PieceColor.WHITE,
     val bot: BotProfile = ChessHubBots.ALL[2],
+    val botBlack: BotProfile = ChessHubBots.ALL[6],
+    val botVsBotPaused: Boolean = false,
     val boardState: ChessBoardState = ChessBoardState.standard(),
     val legalMoves: List<Move> = MoveGenerator.legalMoves(ChessBoardState.standard()),
     val moveHistorySan: List<String> = emptyList(),
@@ -60,9 +67,12 @@ data class LocalGameUiState(
     val selectedDropPiece: PieceType? = null,
     val isBotThinking: Boolean = false,
     val openingMatch: OpeningMatch? = null,
+    val gambitMatch: GambitMatch? = null,
+    val endgameClassification: EndgameClassification? = null,
     val isCurrentMoveBook: Boolean = false,
     val hintMove: Move? = null,
     val coachMessage: String = "",
+    val botDialogueText: String = "",
     val savedToArchive: Boolean = false,
     val pendingConfirmMove: Move? = null,
 )
@@ -70,6 +80,7 @@ data class LocalGameUiState(
 class LocalGameViewModel(
     private val localRepo: LocalChessRepository,
     private val soundManager: SoundAndHapticsManager,
+    private val voiceCoach: VoiceCoachManager? = null,
 ) : ViewModel() {
     private val _uiState = MutableStateFlow(LocalGameUiState())
     val uiState: StateFlow<LocalGameUiState> = _uiState.asStateFlow()
@@ -101,6 +112,7 @@ class LocalGameViewModel(
         timeControl: TimeControl,
         humanColor: PieceColor,
         bot: BotProfile = _uiState.value.bot,
+        botBlack: BotProfile = _uiState.value.botBlack,
         customInitialFen: String? = null,
     ) {
         clockJob?.cancel()
@@ -119,6 +131,8 @@ class LocalGameViewModel(
         rootNode = MoveNode(state = initial, move = null, san = "")
         currentNode = rootNode
         val initialMs = if (timeControl.clockType == ClockType.UNLIMITED) 0L else timeControl.initialSeconds * 1000L
+        val startDialogue = if (mode != PlayMode.PASS_AND_PLAY) bot.dialogueFor("start", 0) else ""
+        val endgame = if (currentSettings.endgameRecognitionEnabled) EndgameClassifier.classify(initial) else null
 
         _uiState.value = LocalGameUiState(
             gameId = UUID.randomUUID().toString(),
@@ -127,22 +141,49 @@ class LocalGameViewModel(
             timeControl = timeControl,
             humanColor = humanColor,
             bot = bot,
+            botBlack = botBlack,
+            botVsBotPaused = false,
             boardState = initial,
             legalMoves = MoveGenerator.legalMoves(initial),
             flipped = mode == PlayMode.VS_BOT && humanColor == PieceColor.BLACK,
             whiteTimeMs = initialMs,
             blackTimeMs = initialMs,
+            endgameClassification = endgame,
+            botDialogueText = startDialogue,
         )
 
+        if (startDialogue.isNotBlank()) {
+            voiceCoach?.speakBot(startDialogue, currentSettings)
+        }
+
         startClockLoop()
-        if (mode == PlayMode.VS_BOT && initial.sideToMove != humanColor) {
+        if ((mode == PlayMode.VS_BOT && initial.sideToMove != humanColor) || mode == PlayMode.BOT_VS_BOT) {
             triggerBotMove()
         }
     }
 
+    fun toggleBotVsBotPause() {
+        val curr = _uiState.value
+        if (curr.mode != PlayMode.BOT_VS_BOT || curr.gameStatus.isTerminal) return
+        val nextPaused = !curr.botVsBotPaused
+        _uiState.update { it.copy(botVsBotPaused = nextPaused) }
+        if (nextPaused) {
+            botJob?.cancel()
+            _uiState.update { it.copy(isBotThinking = false) }
+        } else {
+            triggerBotMove()
+        }
+    }
+
+    fun stepBotVsBotNext() {
+        val curr = _uiState.value
+        if (curr.mode != PlayMode.BOT_VS_BOT || curr.gameStatus.isTerminal || curr.isBotThinking) return
+        triggerBotMove(forceSingleStep = true)
+    }
+
     fun onUserMove(move: Move) {
         val curr = _uiState.value
-        if (curr.gameStatus.isTerminal) return
+        if (curr.gameStatus.isTerminal || curr.mode == PlayMode.BOT_VS_BOT) return
         if (currentSettings.confirmMoves && curr.pendingConfirmMove == null) {
             _uiState.update { it.copy(pendingConfirmMove = move) }
             return
@@ -227,6 +268,7 @@ class LocalGameViewModel(
                 isBotThinking = false,
                 hintMove = null,
                 premoveQueue = emptyList(),
+                endgameClassification = if (currentSettings.endgameRecognitionEnabled) EndgameClassifier.classify(restored) else null,
             )
         }
     }
@@ -236,14 +278,15 @@ class LocalGameViewModel(
         if (curr.gameStatus.isTerminal || curr.isBotThinking) return
         viewModelScope.launch {
             val engine = ChessEngine(currentSettings.lowMemoryMode)
-            val line = engine.evaluateBest(curr.boardState, depth = 3, timeLimitMs = 700L)
+            val line = engine.evaluateBest(curr.boardState, depth = currentSettings.engineDepth.coerceIn(2, 4), timeLimitMs = 700L)
             val best = line?.pvMoves?.firstOrNull()
             val coach = engine.explainCurrentPosition(curr.boardState, line)
             _uiState.update { it.copy(hintMove = best, coachMessage = coach) }
+            voiceCoach?.speakTrainer(coach, currentSettings)
         }
     }
 
-    private fun executeMove(move: Move) {
+    private fun executeMove(move: Move, fromBot: Boolean = false) {
         val curr = _uiState.value
         if (curr.gameStatus.isTerminal) return
         val legal = curr.legalMoves
@@ -252,7 +295,7 @@ class LocalGameViewModel(
                 (it.promotion == move.promotion || (move.promotion == null && it.promotion == PieceType.QUEEN)) &&
                 it.dropPieceType == move.dropPieceType
         } ?: run {
-            soundManager.play(ChessSoundType.ERROR, currentSettings.soundEnabled, currentSettings.soundVolume, currentSettings.hapticsEnabled, currentSettings.lowMemoryMode)
+            soundManager.play(ChessSoundType.ERROR, currentSettings)
             return
         }
 
@@ -265,22 +308,47 @@ class LocalGameViewModel(
         currentNode = currentNode.addOrGetChild(validMove, san, nextState)
 
         val newUcis = curr.moveHistoryUci + validMove.uci
-        val openingMatch = if (curr.variant == ChessVariant.STANDARD) OpeningBook.recognize(newUcis) else null
+        val openingMatch = if (curr.variant == ChessVariant.STANDARD && currentSettings.openingRecognitionEnabled) {
+            OpeningBook.recognize(newUcis)
+        } else null
+        val gambitMatch = if (curr.variant == ChessVariant.STANDARD && currentSettings.gambitRecognitionEnabled) {
+            OpeningBook.recognizeGambit(newUcis)
+        } else null
+        val endgame = if (currentSettings.endgameRecognitionEnabled) EndgameClassifier.classify(nextState) else null
         val isBook = curr.variant == ChessVariant.STANDARD &&
+            currentSettings.openingBookEnabled &&
             OpeningBook.getLocalBookMoves(curr.boardState, curr.moveHistoryUci).any { it.uci == validMove.uci }
 
         val (newWhiteMs, newBlackMs) = applyIncrement(curr.whiteTimeMs, curr.blackTimeMs, mover, curr.timeControl)
         val (status, winner) = MoveGenerator.evaluateGameResult(nextState, positionCounts)
+        val isCheckNow = MoveGenerator.isKingInCheck(nextState, nextState.sideToMove)
 
         val soundType = when {
             status.isTerminal -> ChessSoundType.GAME_END
-            MoveGenerator.isKingInCheck(nextState, nextState.sideToMove) -> ChessSoundType.CHECK
+            isCheckNow -> ChessSoundType.CHECK
             validMove.promotion != null -> ChessSoundType.PROMOTION
             validMove.isCastling -> ChessSoundType.CASTLE
             wasCapture -> ChessSoundType.CAPTURE
+            isBook && currentSettings.sfxBookMove -> ChessSoundType.BOOK_MOVE
             else -> ChessSoundType.MOVE
         }
-        soundManager.play(soundType, currentSettings.soundEnabled, currentSettings.soundVolume, currentSettings.hapticsEnabled, currentSettings.lowMemoryMode)
+        soundManager.play(soundType, currentSettings)
+
+        var dialogue = curr.botDialogueText
+        if (fromBot || status.isTerminal) {
+            val activeBot = if (curr.mode == PlayMode.BOT_VS_BOT && mover == PieceColor.BLACK) curr.botBlack else curr.bot
+            val event = when {
+                status.isTerminal && winner == mover -> "win"
+                status.isTerminal && winner != null -> "lose"
+                isCheckNow -> "check"
+                wasCapture -> "capture"
+                else -> "move"
+            }
+            if (curr.mode != PlayMode.PASS_AND_PLAY && (status.isTerminal || isCheckNow || wasCapture || newUcis.size % 6 == 0)) {
+                dialogue = activeBot.dialogueFor(event, newUcis.size)
+                voiceCoach?.speakBot(dialogue, currentSettings)
+            }
+        }
 
         _uiState.update {
             it.copy(
@@ -297,7 +365,10 @@ class LocalGameViewModel(
                 selectedDropPiece = null,
                 hintMove = null,
                 openingMatch = openingMatch ?: it.openingMatch,
+                gambitMatch = gambitMatch ?: it.gambitMatch,
+                endgameClassification = endgame,
                 isCurrentMoveBook = isBook,
+                botDialogueText = dialogue,
                 pendingConfirmMove = null,
             )
         }
@@ -307,10 +378,11 @@ class LocalGameViewModel(
             return
         }
 
-        if (curr.mode == PlayMode.VS_BOT && nextState.sideToMove != curr.humanColor) {
+        if (curr.mode == PlayMode.BOT_VS_BOT && !curr.botVsBotPaused) {
+            triggerBotMove()
+        } else if (curr.mode == PlayMode.VS_BOT && nextState.sideToMove != curr.humanColor) {
             triggerBotMove()
         } else if (curr.mode == PlayMode.VS_BOT && nextState.sideToMove == curr.humanColor) {
-            // Try executing queued premove
             val premove = _uiState.value.premoveQueue.firstOrNull()
             if (premove != null) {
                 _uiState.update { it.copy(premoveQueue = it.premoveQueue.drop(1)) }
@@ -325,17 +397,28 @@ class LocalGameViewModel(
         }
     }
 
-    private fun triggerBotMove() {
+    private fun triggerBotMove(forceSingleStep: Boolean = false) {
         botJob?.cancel()
         botJob = viewModelScope.launch {
             val curr = _uiState.value
+            if (curr.mode == PlayMode.BOT_VS_BOT && curr.botVsBotPaused && !forceSingleStep) return@launch
+            val activeBot = if (curr.mode == PlayMode.BOT_VS_BOT && curr.boardState.sideToMove == PieceColor.BLACK) {
+                curr.botBlack
+            } else {
+                curr.bot
+            }
             _uiState.update { it.copy(isBotThinking = true) }
             val engine = ChessEngine(currentSettings.lowMemoryMode)
-            val chosen = engine.chooseBotMove(curr.boardState, curr.bot, curr.moveHistoryUci)
-            delay(if (currentSettings.lowMemoryMode) 150L else 280L)
+            val chosen = engine.chooseBotMove(
+                state = curr.boardState,
+                bot = activeBot,
+                playedUciMoves = curr.moveHistoryUci,
+                useOpeningBook = currentSettings.openingBookEnabled,
+            )
+            delay(if (currentSettings.lowMemoryMode) 150L else if (curr.mode == PlayMode.BOT_VS_BOT) 380L else 260L)
             _uiState.update { it.copy(isBotThinking = false) }
             if (chosen != null) {
-                executeMove(chosen)
+                executeMove(chosen, fromBot = true)
             }
         }
     }
@@ -386,7 +469,7 @@ class LocalGameViewModel(
     private fun finishGame(status: GameStatus, winner: PieceColor?) {
         clockJob?.cancel()
         botJob?.cancel()
-        soundManager.play(ChessSoundType.GAME_END, currentSettings.soundEnabled, currentSettings.soundVolume, currentSettings.hapticsEnabled, currentSettings.lowMemoryMode)
+        soundManager.play(ChessSoundType.GAME_END, currentSettings)
         _uiState.update {
             it.copy(
                 gameStatus = status,
@@ -407,10 +490,24 @@ class LocalGameViewModel(
             curr.winner == PieceColor.BLACK -> "0-1"
             else -> "1/2-1/2"
         }
+        val whiteName = when (curr.mode) {
+            PlayMode.VS_BOT -> if (curr.humanColor == PieceColor.BLACK) "${curr.bot.name} (${curr.bot.approxStrengthLabel})" else "Player White"
+            PlayMode.BOT_VS_BOT -> "${curr.bot.name} (${curr.bot.approxStrengthLabel})"
+            PlayMode.PASS_AND_PLAY -> "Player White"
+        }
+        val blackName = when (curr.mode) {
+            PlayMode.VS_BOT -> if (curr.humanColor == PieceColor.WHITE) "${curr.bot.name} (${curr.bot.approxStrengthLabel})" else "Player Black"
+            PlayMode.BOT_VS_BOT -> "${curr.botBlack.name} (${curr.botBlack.approxStrengthLabel})"
+            PlayMode.PASS_AND_PLAY -> "Player Black"
+        }
         val headers = mapOf(
-            "Event" to if (curr.mode == PlayMode.VS_BOT) "ChessHub vs ${curr.bot.name}" else "ChessHub Over The Board",
-            "White" to if (curr.mode == PlayMode.VS_BOT && curr.humanColor == PieceColor.BLACK) "${curr.bot.name} (${curr.bot.approxStrengthLabel})" else "Player White",
-            "Black" to if (curr.mode == PlayMode.VS_BOT && curr.humanColor == PieceColor.WHITE) "${curr.bot.name} (${curr.bot.approxStrengthLabel})" else "Player Black",
+            "Event" to when (curr.mode) {
+                PlayMode.VS_BOT -> "ChessHub vs ${curr.bot.name}"
+                PlayMode.BOT_VS_BOT -> "${curr.bot.name} vs ${curr.botBlack.name}"
+                PlayMode.PASS_AND_PLAY -> "ChessHub Over The Board"
+            },
+            "White" to whiteName,
+            "Black" to blackName,
             "Variant" to curr.variant.displayName,
             "TimeControl" to curr.timeControl.label,
             "ECO" to (curr.openingMatch?.eco ?: ""),
@@ -430,15 +527,27 @@ class LocalGameViewModel(
         }
         val entity = LocalGameEntity(
             id = curr.gameId,
-            whiteName = if (curr.mode == PlayMode.VS_BOT && curr.humanColor == PieceColor.BLACK) curr.bot.name else "You",
-            blackName = if (curr.mode == PlayMode.VS_BOT && curr.humanColor == PieceColor.WHITE) curr.bot.name else "Opponent",
-            whiteRating = if (curr.mode == PlayMode.VS_BOT && curr.humanColor == PieceColor.BLACK) curr.bot.approxElo else 1500,
-            blackRating = if (curr.mode == PlayMode.VS_BOT && curr.humanColor == PieceColor.WHITE) curr.bot.approxElo else 1500,
+            whiteName = when (curr.mode) {
+                PlayMode.VS_BOT -> if (curr.humanColor == PieceColor.BLACK) curr.bot.name else "You"
+                PlayMode.BOT_VS_BOT -> curr.bot.name
+                PlayMode.PASS_AND_PLAY -> "White"
+            },
+            blackName = when (curr.mode) {
+                PlayMode.VS_BOT -> if (curr.humanColor == PieceColor.WHITE) curr.bot.name else "Opponent"
+                PlayMode.BOT_VS_BOT -> curr.botBlack.name
+                PlayMode.PASS_AND_PLAY -> "Black"
+            },
+            whiteRating = if (curr.mode == PlayMode.BOT_VS_BOT || (curr.mode == PlayMode.VS_BOT && curr.humanColor == PieceColor.BLACK)) curr.bot.approxElo else 1500,
+            blackRating = when (curr.mode) {
+                PlayMode.BOT_VS_BOT -> curr.botBlack.approxElo
+                PlayMode.VS_BOT -> if (curr.humanColor == PieceColor.WHITE) curr.bot.approxElo else 1500
+                PlayMode.PASS_AND_PLAY -> 1500
+            },
             result = resultStr,
             resultReason = curr.gameStatus.description,
             variant = curr.variant.displayName,
             timeControl = curr.timeControl.label,
-            mode = if (curr.mode == PlayMode.VS_BOT) "bot" else "otb",
+            mode = curr.mode.name.lowercase(),
             openingEco = curr.openingMatch?.eco ?: "",
             openingName = curr.openingMatch?.name ?: "",
             initialFen = rootNode.state.toFen(),
@@ -457,3 +566,4 @@ class LocalGameViewModel(
         botJob?.cancel()
     }
 }
+

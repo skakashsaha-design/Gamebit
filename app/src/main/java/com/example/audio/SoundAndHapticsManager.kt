@@ -8,6 +8,7 @@ import android.os.Build
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
+import com.example.data.local.AppSettings
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -24,6 +25,9 @@ enum class ChessSoundType {
     PROMOTION,
     GAME_END,
     ERROR,
+    BUTTON,
+    BOOK_MOVE,
+    FEEDBACK,
 }
 
 /**
@@ -39,6 +43,28 @@ class SoundAndHapticsManager(context: Context) {
         } else {
             @Suppress("DEPRECATION")
             appContext.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
+        }
+    }
+
+    fun play(
+        type: ChessSoundType,
+        settings: AppSettings,
+    ) {
+        val categoryEnabled = when (type) {
+            ChessSoundType.MOVE, ChessSoundType.CASTLE -> settings.sfxMove
+            ChessSoundType.CAPTURE -> settings.sfxCapture
+            ChessSoundType.CHECK -> settings.sfxCheck
+            ChessSoundType.GAME_END -> settings.sfxCheckmate
+            ChessSoundType.PROMOTION -> settings.sfxPromotion
+            ChessSoundType.ERROR, ChessSoundType.FEEDBACK -> settings.sfxFeedback
+            ChessSoundType.BUTTON -> settings.sfxButton
+            ChessSoundType.BOOK_MOVE -> settings.sfxBookMove
+        }
+        if (settings.hapticsEnabled && !settings.lowMemoryMode) {
+            triggerHaptic(type)
+        }
+        if (settings.soundEnabled && categoryEnabled && settings.soundVolume > 0.02f) {
+            scope.launch { playTone(type, settings.soundVolume.coerceIn(0f, 1f)) }
         }
     }
 
@@ -64,12 +90,14 @@ class SoundAndHapticsManager(context: Context) {
             ChessSoundType.CAPTURE, ChessSoundType.CHECK -> 26L
             ChessSoundType.GAME_END -> 45L
             ChessSoundType.ERROR -> 35L
+            ChessSoundType.BUTTON -> 8L
             else -> 12L
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val amp = when (type) {
                 ChessSoundType.CAPTURE, ChessSoundType.CHECK -> 140
                 ChessSoundType.GAME_END -> 180
+                ChessSoundType.BUTTON -> 45
                 else -> 70
             }
             v.vibrate(VibrationEffect.createOneShot(ms, amp))
@@ -85,6 +113,8 @@ class SoundAndHapticsManager(context: Context) {
             val durationMs = when (type) {
                 ChessSoundType.GAME_END -> 190
                 ChessSoundType.CHECK -> 110
+                ChessSoundType.BOOK_MOVE, ChessSoundType.FEEDBACK -> 85
+                ChessSoundType.BUTTON -> 32
                 else -> 55
             }
             val numSamples = (sampleRate * durationMs) / 1000
@@ -97,6 +127,9 @@ class SoundAndHapticsManager(context: Context) {
                 ChessSoundType.PROMOTION -> 740.0
                 ChessSoundType.GAME_END -> 520.0
                 ChessSoundType.ERROR -> 150.0
+                ChessSoundType.BUTTON -> 480.0
+                ChessSoundType.BOOK_MOVE -> 585.0
+                ChessSoundType.FEEDBACK -> 660.0
             }
 
             for (i in 0 until numSamples) {

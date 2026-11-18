@@ -1,0 +1,1917 @@
+# CHESSHUB ULTIMATE MASTER BUILD PROMPT v5.0
+
+Build a completely new, production-quality chess platform named **ChessHub** from scratch.
+
+**IMPORTANT: The previous ChessHub workflow failed. DO NOT repair, patch, or continue the previous broken workflow. Start a completely new clean project and workflow.**
+
+Use the uploaded ChessHub specification, the supplied Lichess Mobile v0.30.3 source as a reference where legally/technically appropriate, and the failed ChessHub package only for feature/reference analysis. Do not copy proprietary code/assets. Respect all open-source licenses.
+
+The final result must be a real working chess application, not a collection of mock screens.
+
+---
+
+# 1. DEVELOPMENT WORKFLOW
+
+Use this workflow:
+
+1. Analyze all requirements.
+2. Design the complete architecture.
+3. Create a NEW clean project.
+4. Implement chess rules and game state.
+5. Implement board UI.
+6. Implement local games.
+7. Implement engine integration.
+8. Implement advanced bots.
+9. Implement time controls.
+10. Implement profiles.
+11. Implement rating/ELO system.
+12. Implement game history.
+13. Implement analysis and review.
+14. Implement puzzles and training.
+15. Implement opening/gambit/book recognition.
+16. Implement endgame recognition.
+17. Implement online multiplayer/backend.
+18. Implement ranked matches.
+19. Implement player search.
+20. Implement Lichess/Chess.com profile integration.
+21. Implement watch/spectator.
+22. Implement chat.
+23. Implement news/explore.
+24. Implement music/audio.
+25. Implement achievements/badges/awards.
+26. Implement settings.
+27. Implement offline mode.
+28. Test every feature.
+29. Fix all crashes and state bugs.
+30. Build release APK.
+31. Install and test the APK on a real Android device.
+32. Produce a final feature/status report.
+
+**Never declare a feature complete merely because its UI exists.**
+
+---
+
+# 2. PLATFORM AND LOW-END PERFORMANCE
+
+Target:
+
+- Android 8.1/API 27+
+- Low-end Android devices
+- Approximately 1 GB RAM devices
+- Samsung Galaxy A2 Core class hardware
+- Lightweight APK
+- Low memory usage
+- Low battery usage
+- Fast startup
+- No unnecessary background services
+
+Add:
+
+- Low Memory Mode
+- Reduced Animation Mode
+- Low Engine Resource Mode
+- Lightweight piece sets
+- Lightweight avatars
+- Lazy loading
+- Cache management
+- Engine resource limits
+- Automatic performance profile
+
+Heavy features must not freeze the board.
+
+---
+
+# 3. COMPLETE CHESS RULES
+
+Implement complete legal chess:
+
+- King
+- Queen
+- Rook
+- Bishop
+- Knight
+- Pawn
+- Legal movement
+- Captures
+- Check
+- Checkmate
+- Stalemate
+- Castling kingside
+- Castling queenside
+- Castling restrictions
+- En passant
+- Pawn promotion
+- Queen promotion
+- Rook promotion
+- Bishop promotion
+- Knight promotion
+- Underpromotion
+- King safety
+- Pins
+- Skewers
+- Discovered attacks
+- Double check
+- Threefold repetition
+- Fivefold repetition
+- 50-move rule
+- 75-move rule
+- Draw by agreement
+- Insufficient material
+- Dead positions
+- Resignation
+- Timeout
+- Correct game termination
+
+Support complete FEN and PGN compatibility.
+
+---
+
+# 4. CHECKMATE LIBRARY
+
+Create a checkmate pattern database/trainer containing:
+
+- Fool's Mate
+- Scholar's Mate
+- Back-rank mate
+- Smothered mate
+- Arabian mate
+- Anastasia's mate
+- Boden's mate
+- Epaulette mate
+- Hook mate
+- Corridor mate
+- Ladder mate
+- Double-check mate
+- Discovered-check mate
+- Sacrificial mating attacks
+- Promotion checkmates
+- Queen mating patterns
+- Rook mating patterns
+- Bishop mating patterns
+- Knight mating patterns
+- Basic king-and-piece mates
+- Common tactical mating patterns
+- Custom legal checkmate positions
+
+Include **Checkmate Trainer**.
+
+---
+
+# 5. BOARD
+
+Create a professional responsive chess board.
+
+Support:
+
+- Tap-to-move
+- Drag-and-drop
+- Legal move indicators
+- Last-move highlight
+- Check highlight
+- Checkmate animation
+- Coordinates
+- Board flip
+- Player perspective
+- Arrows
+- Circles
+- Multiple board themes
+- Multiple chess piece sets
+- Classic pieces
+- Modern pieces
+- Minimal pieces
+- Wooden pieces
+- High-contrast pieces
+- Colorblind-friendly themes
+- Lightweight pieces
+- Optional lightweight 3D-style pieces on capable devices
+
+Never allow overlays to block the board unnecessarily.
+
+---
+
+# 6. PIECE AND MOVE ANIMATION
+
+Support:
+
+- Piece movement animation
+- Capture animation
+- Promotion animation
+- Castling animation
+- En passant animation
+- Check animation
+- Checkmate animation
+- Move feedback animation
+- Adjustable animation speed
+- Animation ON/OFF
+- Low-performance animation mode
+
+---
+
+# 7. MOVE CONTROLS
+
+Support:
+
+- Premove
+- Confirm move
+- Auto queen
+- Rewind
+- Forward
+- Previous move
+- Next move
+- First move
+- Last move
+- Move navigation
+- Variation navigation
+- Board flip
+- Resign
+- Draw offer
+- Draw acceptance/rejection
+- Rematch
+- Takeback where the game mode allows it
+
+Rewind/forward must be available for replay, training, analysis and review.
+
+---
+
+# 8. GAME TYPE SELECTION BEFORE MATCH
+
+Before starting a match, create a clear **New Game** screen.
+
+Player must be able to select:
+
+### Opponent
+- Human
+- Friend
+- Bot
+- Online opponent
+- Random opponent
+
+### Game mode
+- Casual
+- Ranked
+- Training
+- Practice
+- Tournament
+- Correspondence
+- Puzzle
+- Bot game
+- Local game
+
+### Time control
+- Bullet
+- Blitz
+- Rapid
+- Classical
+- Custom
+- Unlimited
+- Correspondence
+
+### Standard presets
+Include selectable presets such as:
+
+- 1+0 Bullet
+- 2+1 Bullet
+- 3+0 Blitz
+- 3+2 Blitz
+- 5+0 Blitz
+- 5+3 Blitz
+- 10+0 Rapid
+- 10+5 Rapid
+- 15+10 Rapid
+- 30+0 Classical
+- 30+20 Classical
+- Custom time
+
+Clearly show:
+**Initial time + increment/delay**
+
+Allow users to choose custom values.
+
+---
+
+# 9. ONLINE RAPID, BLITZ AND BULLET
+
+Real online games must support:
+
+- Bullet
+- Blitz
+- Rapid
+- Classical
+- Custom time
+
+Support:
+
+- Live clocks
+- Increment
+- Delay
+- Server-authoritative clock
+- Server-authoritative moves
+- Reconnect
+- Network interruption recovery
+- Timeout
+- Resignation
+- Draw
+- Rematch
+- Rating update
+- Game history
+
+Never simulate online multiplayer locally.
+
+---
+
+# 10. RANKED MATCH SYSTEM
+
+Create a real ranked system.
+
+Support separate ratings for:
+
+- Bullet
+- Blitz
+- Rapid
+- Classical
+- Puzzle
+- Variants where supported
+
+Before a ranked match show:
+
+- Player rating
+- Opponent rating
+- Time control
+- Rated/unrated
+- Expected rating change where possible
+
+After the game:
+
+- Rating before
+- Rating after
+- Rating change
+- `+` for rating gain
+- `-` for rating loss
+- Draw rating change
+- New rating
+- Rating graph
+
+Example:
+
+**Rapid: 1420 → 1441 (+21)**
+
+or
+
+**Blitz: 1560 → 1543 (-17)**
+
+Do not fake rating calculations. Use a clearly defined rating system such as Glicko-2/Elo and document it.
+
+---
+
+# 11. PLAYER ELO/RATING
+
+Profile must show:
+
+- Bullet rating
+- Blitz rating
+- Rapid rating
+- Classical rating
+- Puzzle rating
+- Variant ratings
+- Peak rating
+- Rating history
+- Rating graph
+- Games played
+- Wins
+- Losses
+- Draws
+- Win percentage
+- Current streak
+- Best streak
+
+Show rating separately for ranked and casual games.
+
+---
+
+# 12. PLAYER PROFILE
+
+Create a complete profile:
+
+- Username
+- Display name
+- Player avatar
+- Country
+- Country flag
+- FIDE federation
+- Rating
+- Titles
+- Badges
+- Awards
+- Achievements
+- Games
+- Game history
+- Accuracy
+- Favorite opening
+- Favorite gambit
+- Favorite time control
+- Training progress
+- Puzzle rating
+- Rating graph
+- Statistics
+- Studies
+- Friends
+
+Allow users to edit:
+
+- Username where allowed
+- Display name
+- Avatar
+- Country
+- Flag
+- Profile information
+- Privacy settings
+
+---
+
+# 13. SEARCH OTHER PLAYERS
+
+Create a global player search.
+
+Search by:
+
+- Username
+- Display name
+- Exact username
+- Partial username
+
+Search results show:
+
+- Avatar
+- Username
+- Country flag
+- Rating
+- Title
+- Online/offline status where appropriate
+- Follow/friend option
+- Challenge option
+
+Opening a player profile should show:
+
+- Ratings
+- Game statistics
+- Recent games
+- Achievements
+- Badges
+- Awards
+- Favorite openings
+- Public studies
+- Profile information
+- Lichess profile link where connected
+- Chess.com profile link where connected
+
+Respect privacy settings.
+
+---
+
+# 14. LICHESS PROFILE INPUT
+
+Add a profile integration section:
+
+**Lichess Username**
+
+User can enter their Lichess username.
+
+Support:
+
+- Profile lookup
+- Username
+- Rating information where available
+- Games where permitted
+- Statistics where available
+- Public profile information
+- Profile link
+- Import/review public games where legally permitted
+- Lichess account connection architecture where appropriate
+
+Clearly identify external data as Lichess data.
+
+Do not scrape private endpoints.
+
+---
+
+# 15. CHESS.COM PROFILE INPUT
+
+Add:
+
+**Chess.com Username**
+
+Support:
+
+- Profile lookup
+- Public profile information
+- Public ratings where available
+- Public game history where permitted
+- Public statistics where available
+- Profile link
+- Import/review public games where legally permitted
+
+Do not pretend that Chess.com account authentication exists unless a real supported integration is implemented.
+
+Use official/public interfaces and respect terms.
+
+---
+
+# 16. GAME HISTORY
+
+Create a complete Game History system.
+
+Store:
+
+- Date
+- Time
+- Player
+- Opponent
+- Opponent rating
+- Result
+- Rating before
+- Rating after
+- Rating change
+- Time control
+- Game type
+- Ranked/casual
+- Opening
+- Gambit
+- Accuracy
+- Blunders
+- Mistakes
+- Inaccuracies
+- Brilliant moves
+- PGN
+- FEN where relevant
+- Analysis status
+
+Filter by:
+
+- Bullet
+- Blitz
+- Rapid
+- Classical
+- Ranked
+- Casual
+- Bot
+- Online
+- Local
+- Win
+- Loss
+- Draw
+- Opening
+- Date
+
+Allow:
+
+- Replay
+- Analyze
+- Review
+- Export PGN
+- Share where supported
+- Delete local history
+
+---
+
+# 17. AFTER-MATCH REVIEW
+
+After every completed game show:
+
+### Game summary
+- Result
+- Player rating
+- Opponent rating
+- Rating change
+- Accuracy
+- Time used
+- Opening
+- Gambit
+- Game mode
+- Time control
+
+### Player
+- Score
+- Accuracy
+- Best moves
+- Brilliant moves
+- Great moves
+- Good moves
+- Book moves
+- Inaccuracies
+- Mistakes
+- Blunders
+- Missed wins
+- Missed mates
+
+### Opponent
+Show the same complete statistics.
+
+Create two separate move-feedback lists:
+
+**PLAYER MOVE FEEDBACK**
+
+**OPPONENT MOVE FEEDBACK**
+
+Each move can show:
+
+- Move number
+- SAN
+- Evaluation
+- Classification
+- Best alternative
+- Engine line
+- Explanation
+- Accuracy impact
+
+---
+
+# 18. EVALUATION GRAPH AFTER MATCH
+
+Show an interactive evaluation graph.
+
+Include:
+
+- Complete game timeline
+- Evaluation
+- Move markers
+- Blunders
+- Mistakes
+- Critical moments
+- Opening
+- Middlegame
+- Endgame
+- Click graph to jump to move
+- Zoom
+- Rewind
+- Forward
+
+---
+
+# 19. ADVANCED GAME ANALYSIS
+
+Create a powerful Analysis screen:
+
+- Engine
+- Evaluation bar
+- Evaluation graph
+- Engine line
+- MultiPV
+- Candidate moves
+- Best move
+- Threat arrow
+- Suggestion arrow
+- Move feedback
+- Opening recognition
+- Gambit recognition
+- Book move
+- Endgame recognition
+- Tablebase
+- Variations
+- Arrows
+- Circles
+- FEN
+- PGN
+- Rewind
+- Forward
+- Move explanations
+
+---
+
+# 20. ADVANCED GAME REVIEW
+
+Game Review should automatically find:
+
+- Best moves
+- Brilliant moves
+- Great moves
+- Book moves
+- Inaccuracies
+- Mistakes
+- Blunders
+- Missed wins
+- Missed mates
+- Tactical opportunities
+- Critical moments
+
+Provide:
+
+- Simple explanation
+- Advanced explanation
+- Engine explanation
+- Alternative move
+- Threat explanation
+- Practice position
+
+---
+
+# 21. "WHY WAS THIS A MISTAKE?"
+
+For each major mistake:
+
+Show:
+
+1. Your move
+2. Better move
+3. Evaluation before
+4. Evaluation after
+5. What changed
+6. Opponent's threat
+7. Tactical reason
+8. Material consequence
+9. Position explanation
+10. Suggested improvement
+
+Example:
+
+“Your move allowed the opponent to win material because the defender was overloaded.”
+
+The explanation must be generated from the actual board position.
+
+---
+
+# 22. ADVANCED BOTS
+
+Improve the bot system significantly.
+
+Bots approximately **200–3200 strength**, with the rating treated as approximate unless calibrated.
+
+Bot types:
+
+- Beginner
+- Casual
+- Aggressive
+- Defensive
+- Tactical
+- Positional
+- Attacking
+- Endgame specialist
+- Opening specialist
+- Gambit specialist
+- Classical
+- Speed player
+- Creative
+- Risky
+- Solid
+- Experimental
+- Calculation-focused
+
+Each bot has:
+
+- Name
+- Avatar
+- Approximate strength
+- Personality
+- Opening preferences
+- Gambit preferences
+- Tactical style
+- Risk level
+- Time-management style
+- Voice
+- Dialogue style
+- Description
+
+Advanced bot features:
+
+- Opening preparation
+- Endgame strength
+- Tactical strength
+- Variable randomness
+- Time management
+- Difficulty adjustment
+- Personality-based move preferences
+- Different opening repertoires
+- Training mode
+- Bot vs bot
+- Bot tournaments
+- Rematch
+- Takeback where allowed
+
+Never claim a precise Elo unless properly calibrated.
+
+---
+
+# 23. BOT DIALOGUE AND AVATARS
+
+Every major bot can have:
+
+- Avatar
+- Personality
+- Dialogue
+- Voice
+- Text chat
+
+Dialogue can occur:
+
+- Before game
+- After opening
+- After check
+- After mistake
+- After strong move
+- After checkmate
+- After victory
+- After defeat
+- During training
+
+Voice can be:
+
+**ON/OFF**
+
+Trainer voice and bot voice must have separate settings.
+
+---
+
+# 24. CHESS TRAINER
+
+Create an intelligent Chess Trainer.
+
+Training categories:
+
+- Beginner
+- Intermediate
+- Advanced
+- Expert
+- Tactics
+- Strategy
+- Calculation
+- Defense
+- Attack
+- Opening
+- Gambit
+- Endgame
+- Checkmate
+- Blunder prevention
+- Pattern recognition
+- Board vision
+- Coordinates
+- Candidate moves
+- Game review training
+
+Trainer has:
+
+- Avatar
+- Text dialogue
+- Voice dialogue
+- Hints
+- Tips
+- Explanations
+- Progress tracking
+- Difficulty levels
+
+Voice can be ON/OFF.
+
+---
+
+# 25. HINTS
+
+Add:
+
+- Legal move hint
+- Tactical hint
+- Best move hint
+- Threat hint
+- Opening hint
+- Endgame hint
+- Puzzle hint
+- Progressive hints
+- Explanation after hint
+
+Hints must come from the actual position.
+
+---
+
+# 26. MOVE FEEDBACK
+
+Support:
+
+- Book move
+- Best move
+- Brilliant
+- Excellent
+- Great
+- Good
+- Accurate
+- Forced
+- Only move
+- Inaccuracy
+- Mistake
+- Blunder
+- Missed win
+- Missed mate
+- Tactical opportunity
+- Critical move
+- Opening move
+- Endgame move
+
+All classifications must be engine/data based.
+
+---
+
+# 27. BOOK MOVE
+
+Show:
+
+- Book move
+- Opening name
+- Variation
+- ECO
+- Popularity
+- Statistics where available
+- Book continuation
+
+Settings:
+
+- Book Move ON/OFF
+- Book Move Sound ON/OFF
+- Book Move Animation ON/OFF
+
+Clearly distinguish:
+
+**BOOK MOVE ≠ ENGINE BEST MOVE**
+
+---
+
+# 28. OPENING RECOGNITION
+
+Automatically recognize:
+
+- Opening
+- Variation
+- ECO
+- Current line
+- Deviations
+- Book status
+- Common plans
+- Popular moves
+
+Setting:
+
+**Opening Recognition ON/OFF**
+
+---
+
+# 29. GAMBIT RECOGNITION
+
+Recognize common gambits:
+
+- King's Gambit
+- Queen's Gambit
+- Evans Gambit
+- Danish Gambit
+- Smith-Morra Gambit
+- Benko Gambit
+- Budapest Gambit
+- Englund Gambit
+- Stafford Gambit
+- Marshall Gambit
+- Scotch Gambit
+- Blackmar-Diemer Gambit
+- Other recognized gambits
+
+Show:
+
+- Gambit name
+- Accepted/declined
+- Move sequence
+- Book status
+- Recommended ideas
+
+Setting:
+
+**Gambit Recognition ON/OFF**
+
+---
+
+# 30. ENDGAME RECOGNITION
+
+Recognize:
+
+- Pawn endings
+- Rook endings
+- Queen endings
+- Bishop endings
+- Knight endings
+- Bishop vs Knight
+- Queen vs Rook
+- Rook vs minor piece
+- Theoretical endings
+- Tablebase positions
+
+Setting:
+
+**Endgame Recognition ON/OFF**
+
+---
+
+# 31. EVALUATION BAR
+
+Add:
+
+- Live evaluation bar
+- Numerical evaluation
+- Mate score
+- Engine depth
+- Engine time
+- MultiPV
+- Evaluation graph
+
+Settings:
+
+- Evaluation bar ON/OFF
+- Move points ON/OFF
+- Engine line ON/OFF
+- Engine depth
+- MultiPV count
+
+---
+
+# 32. SUGGESTION AND THREAT ARROWS
+
+Add:
+
+- Best-move arrow
+- Candidate arrows
+- Suggestion arrow
+- Threat arrow
+- Tactical arrow
+- Engine arrow
+- User arrows
+- Circles
+
+Settings:
+
+- Suggestion Arrow ON/OFF
+- Threat Arrow ON/OFF
+- Engine Arrow ON/OFF
+
+---
+
+# 33. ENGINE
+
+Integrate a real engine such as Stockfish or another legally usable engine.
+
+Verify:
+
+- UCI
+- isready
+- position
+- go
+- stop
+- bestmove
+- MultiPV
+- Evaluation
+- Mate
+- Principal variation
+- Shutdown
+- Restart
+
+Never fake engine output.
+
+---
+
+# 34. PUZZLES
+
+Include:
+
+- Daily puzzle
+- Random puzzle
+- Tactical puzzle
+- Puzzle from own games
+- Puzzle streak
+- Puzzle storm
+- Puzzle racer
+- Puzzle battle
+- Custom puzzle
+- Puzzle history
+- Puzzle rating
+- Puzzle themes
+- Hints
+- Explanations
+- Retry
+- Progress
+
+---
+
+# 35. OPENING TRAINING
+
+Include:
+
+- Opening selection
+- Variation selection
+- Book move training
+- Gambit training
+- Practice both sides
+- Mistake detection
+- Opening quiz
+- Repetition
+- Progress tracking
+- Opening statistics
+
+---
+
+# 36. ENDGAME TRAINING
+
+Include:
+
+- Basic mates
+- Pawn endings
+- Rook endings
+- Queen endings
+- Minor-piece endings
+- Practical endings
+- Tablebase exercises
+- Endgame quizzes
+- Explanations
+
+---
+
+# 37. EXPLORE
+
+Create a complete **Explore** section:
+
+- Opening Explorer
+- Master games
+- Player games where legally available
+- Opening statistics
+- Popular openings
+- Gambits
+- Famous games
+- Recent games
+- Tournament games
+- Player search
+- Position search
+- FEN exploration
+- Opening tree
+- Game database
+- Analysis from any position
+
+Allow users to click a game and immediately:
+
+**Watch → Replay → Analyze → Review**
+
+---
+
+# 38. WATCH
+
+Create:
+
+- Live games
+- Featured games
+- Tournament games
+- Broadcasts
+- Player games
+- Spectator mode
+- Live board
+- Move list
+- Clock
+- Game information
+- Chat where permitted
+- Post-game analysis
+
+---
+
+# 39. SPECTATOR MODE
+
+Spectators can:
+
+- Watch
+- Pause/replay when appropriate
+- Follow moves
+- View player profiles
+- View ratings
+- View game information
+- Chat where permitted
+- Analyze completed games
+
+Do not expose private information.
+
+---
+
+# 40. ONLINE MULTIPLAYER
+
+Real online infrastructure:
+
+- Authentication
+- Matchmaking
+- Ranked games
+- Casual games
+- Challenges
+- Private rooms
+- Friend games
+- WebSockets/live connection
+- Server-authoritative moves
+- Server-authoritative clocks
+- Reconnect
+- Resign
+- Draw
+- Rematch
+- Spectators
+- Game persistence
+- Chat
+
+---
+
+# 41. RANKED MATCHMAKING
+
+Match players by:
+
+- Rating
+- Time control
+- Variant
+- Connection status
+- Search range
+
+Use rating ranges that expand gradually.
+
+Separate matchmaking pools for:
+
+- Bullet
+- Blitz
+- Rapid
+- Classical
+- Variants where applicable
+
+---
+
+# 42. PLAYER VS PLAYER
+
+Before match:
+
+Show:
+
+- Player avatar
+- Username
+- Country flag
+- Rating
+- Time control
+- Ranked/casual
+- Game type
+
+During match:
+
+- Player information
+- Opponent information
+- Clock
+- Board
+- Move list
+- Premove
+- Resign
+- Draw
+- Chat
+
+After match:
+
+- Result
+- Rating change
+- Accuracy
+- Full review
+- Evaluation graph
+- Move feedback
+
+---
+
+# 43. CHAT
+
+Support:
+
+- Player chat
+- In-game chat
+- Spectator chat where permitted
+- Bot dialogue
+- Trainer dialogue
+- Chat mute
+- Block
+- Report
+- Notifications
+
+---
+
+# 44. MUSIC
+
+Create a Music section/player.
+
+Support:
+
+- Local music
+- Play/pause
+- Previous/next
+- Seek
+- Queue
+- Playlist
+- Shuffle
+- Repeat
+- Background playback where appropriate
+- Volume
+- Game music toggle
+- Training music
+- Menu music
+- Music ON/OFF
+- Low-memory audio mode
+
+Music must not interfere with chess move sounds.
+
+Separate controls:
+
+- Music volume
+- Game sound volume
+- Voice volume
+
+Use Android-safe storage/file-picker APIs and minimal permissions.
+
+---
+
+# 45. AUDIO AND SOUND
+
+Support:
+
+- Move sound
+- Capture sound
+- Check sound
+- Checkmate sound
+- Promotion sound
+- Feedback sound
+- Button sound
+- Bot voice
+- Trainer voice
+- Music
+
+Every category can be independently enabled/disabled.
+
+---
+
+# 46. PROFILE ACHIEVEMENTS
+
+Include:
+
+- Badges
+- Awards
+- Titles
+- Rating milestones
+- Tournament awards
+- Puzzle achievements
+- Opening achievements
+- Gambit achievements
+- Endgame achievements
+- Accuracy achievements
+- Bot achievements
+- Training achievements
+- Streak achievements
+
+---
+
+# 47. TOURNAMENTS
+
+Support architecture for:
+
+- Arena
+- Swiss
+- Scheduled
+- Daily
+- Rated
+- Unrated
+- Bullet
+- Blitz
+- Rapid
+- Classical
+- Variants
+- Bot tournaments
+- Team/club tournaments
+- Leaderboards
+- Pairings
+- Results
+- Spectators
+
+---
+
+# 48. STUDIES
+
+Support:
+
+- Create study
+- Chapters
+- Variations
+- Comments
+- Arrows
+- Circles
+- Engine
+- PGN
+- FEN
+- Opening information
+- Private/public
+- Collections
+- Training from study
+
+---
+
+# 49. GAME HISTORY AND REPLAY
+
+Every saved game must be replayable.
+
+Support:
+
+- First move
+- Previous
+- Next
+- Last
+- Rewind
+- Forward
+- Evaluation
+- Move feedback
+- Engine line
+- Opening
+- Gambit
+- Endgame
+- PGN
+- FEN
+
+---
+
+# 50. BOARD EDITOR
+
+Support:
+
+- Place pieces
+- Remove pieces
+- Set side to move
+- Castling rights
+- En-passant square
+- Load FEN
+- Export FEN
+- Analyze
+- Create puzzle
+- Create training position
+
+---
+
+# 51. PGN
+
+Support:
+
+- Import
+- Export
+- Replay
+- Variations
+- Comments
+- NAGs
+- Player metadata
+- Result
+- Opening metadata
+- Time control
+
+---
+
+# 52. OFFLINE MODE
+
+Offline features:
+
+- Local games
+- Bots
+- Downloaded puzzles
+- Training
+- Game history
+- Local engine analysis
+- Board editor
+- PGN/FEN
+- Settings
+- Cached content
+
+Online-only features must clearly display offline status.
+
+---
+
+# 53. SETTINGS
+
+Create detailed settings:
+
+### Board
+- Board theme
+- Piece set
+- Coordinates
+- Board flip
+- Legal moves
+- Last move
+- Check highlight
+- Arrows
+- Circles
+- Animation
+- Animation speed
+
+### Analysis
+- Engine
+- Evaluation bar
+- Engine line
+- MultiPV
+- Depth
+- Move points
+- Suggestion arrows
+- Threat arrows
+- Opening recognition
+- Gambit recognition
+- Book move
+- Endgame recognition
+- Move feedback
+- Mistake explanation
+- Tips
+- Hints
+- Evaluation graph
+
+### Game
+- Premove
+- Confirm move
+- Auto queen
+- Rewind
+- Takeback
+- Draw confirmation
+- Resign confirmation
+
+### Sound
+- Master sound
+- Move
+- Capture
+- Check
+- Checkmate
+- Feedback
+- Music
+- Bot voice
+- Trainer voice
+- Haptics
+
+### Bot
+- Strength
+- Personality
+- Randomness
+- Opening style
+- Bot voice
+- Bot avatar
+- Dialogue
+
+### Trainer
+- Trainer voice
+- Trainer avatar
+- Difficulty
+- Hint level
+- Explanation level
+
+### Profile
+- Username
+- Avatar
+- Country
+- Flag
+- Privacy
+- Badges
+- Awards
+
+### Online
+- Auto reconnect
+- Notifications
+- Matchmaking
+- Chat
+- Spectator settings
+
+### Performance
+- Low RAM mode
+- Reduced animations
+- Engine resources
+- Cache size
+- Background analysis
+
+### Notifications
+- Challenges
+- Games
+- Messages
+- Tournaments
+- News
+- Training
+- Daily puzzle
+
+### Language
+- English
+- Bengali
+- Localization-ready architecture
+
+---
+
+# 54. DATABASE
+
+Persist:
+
+- User profile
+- Username
+- Country
+- Avatar
+- Ratings
+- Games
+- PGNs
+- Puzzles
+- Training progress
+- Achievements
+- Badges
+- Awards
+- Opening progress
+- Bot games
+- Settings
+- Music playlists
+- Cached content
+
+Use safe database migrations.
+
+---
+
+# 55. SECURITY
+
+Implement:
+
+- Secure authentication
+- Secure token storage
+- Server-side validation
+- Server-authoritative games
+- Anti-cheat architecture
+- Rate limiting
+- Block/report
+- Privacy
+- No API secrets inside APK
+- No client-side trust for online results
+
+---
+
+# 56. LICHESS / CHESS.COM DATA
+
+External profiles must be clearly labeled.
+
+Example:
+
+**ChessHub Profile**
+**Lichess Profile**
+**Chess.com Profile**
+
+Allow a user to enter their public username and retrieve permitted public information.
+
+Do not expose private information.
+
+Do not scrape or bypass restrictions.
+
+---
+
+# 57. NEWS
+
+Add:
+
+- Chess news
+- Tournament news
+- Player news
+- Event news
+- Articles
+- Headlines
+- Refresh
+- Cached articles where legally permitted
+- Source attribution
+
+---
+
+# 58. ABOUT US
+
+Include:
+
+- ChessHub
+- Version
+- Developer/team
+- Mission
+- Credits
+- Open-source licenses
+- Third-party acknowledgements
+- Engine attribution
+- Lichess attribution where required
+- Data sources
+- Privacy
+- Support/contact
+
+---
+
+# 59. UI
+
+Create a polished interface with:
+
+- Home
+- Play
+- Bots
+- Puzzles
+- Training
+- Analysis
+- Review
+- Explore
+- Watch
+- History
+- Profile
+- Music
+- News
+- Settings
+- About
+
+Use adaptive navigation.
+
+Every screen needs:
+
+- Loading state
+- Empty state
+- Error state
+- Offline state
+- Retry
+- Back navigation
+
+No dead buttons.
+
+---
+
+# 60. TESTING
+
+Test:
+
+- All chess rules
+- Checkmate
+- Stalemate
+- Castling
+- En passant
+- Promotion
+- Underpromotion
+- Repetition
+- Draw rules
+- PGN
+- FEN
+- Engine
+- Bots
+- Bot strength
+- Opening recognition
+- Gambit recognition
+- Book moves
+- Endgame recognition
+- Move feedback
+- Accuracy
+- Evaluation graph
+- Review
+- Rewind
+- Premove
+- Bullet
+- Blitz
+- Rapid
+- Classical
+- Ranked games
+- Rating +/-
+- Online clock
+- Reconnection
+- Chat
+- Spectator
+- Player search
+- Profiles
+- Lichess profile input
+- Chess.com profile input
+- Music
+- Voice
+- Trainer
+- Achievements
+- Settings
+- Offline mode
+- Database migrations
+
+---
+
+# 61. LOW-END DEVICE TEST
+
+Specifically test on:
+
+**Android 8.1 / approximately 1 GB RAM**
+
+Verify:
+
+- App launches
+- Board loads
+- Moves remain responsive
+- Bot works
+- Engine works
+- Analysis works
+- Game review works
+- No memory crashes
+- No excessive lag
+- No unnecessary background services
+- Music does not freeze the game
+- Voice does not freeze the game
+- Animations can be disabled
+- App survives recreation
+- Game state is preserved
+
+---
+
+# 62. FEATURE DEPENDENCY RULE
+
+If a feature requires infrastructure that cannot exist only inside the Android APK, implement the correct architecture.
+
+Examples:
+
+- Real online games require backend
+- Server-authoritative clocks require backend
+- Ranked rating requires backend/database
+- Live spectator mode requires backend
+- Online chat requires backend
+- Global player search requires backend
+- Real tournaments require backend
+- External profile data requires supported public APIs/interfaces
+
+**Never fake these features.**
+
+---
+
+# 63. FINAL DELIVERABLE
+
+Produce:
+
+1. Complete source code
+2. Clean project structure
+3. Android project
+4. Backend source where required
+5. Database schema
+6. Database migrations
+7. Tests
+8. Assets
+9. Configuration
+10. License files
+11. Attribution
+12. Setup instructions
+13. Build instructions
+14. APK
+15. Feature status report
+16. Testing report
+17. Known limitations
+
+---
+
+# 64. FINAL FEATURE STATUS
+
+At the end, generate a table:
+
+| Feature | Status | Tested | Dependency |
+|---|---|---|---|
+| Chess rules | | | |
+| Engine | | | |
+| Bots | | | |
+| Bullet | | | |
+| Blitz | | | |
+| Rapid | | | |
+| Ranked | | | |
+| Rating | | | |
+| Online | | | |
+| Profiles | | | |
+| Player search | | | |
+| Lichess profile | | | |
+| Chess.com profile | | | |
+| History | | | |
+| Analysis | | | |
+| Review | | | |
+| Explore | | | |
+| Watch | | | |
+| Spectator | | | |
+| Puzzles | | | |
+| Training | | | |
+| Opening | | | |
+| Gambit | | | |
+| Book moves | | | |
+| Endgame | | | |
+| Music | | | |
+| Voice | | | |
+| Chat | | | |
+| News | | | |
+| Achievements | | | |
+| Badges | | | |
+| Awards | | | |
+
+Use only:
+**Implemented / Tested / Partial / Requires Backend / Requires External API / Not Implemented**
+
+---
+
+# 65. MOST IMPORTANT INSTRUCTION
+
+**DO NOT USE THE PREVIOUS FAILED WORKFLOW.**
+
+Start from a clean project.
+
+Do not silently switch frameworks.
+
+Do not create fake APIs.
+
+Do not create fake online multiplayer.
+
+Do not claim Stockfish works until it actually starts and returns valid UCI output.
+
+Do not claim online games work without a real backend.
+
+Do not claim Lichess/Chess.com integration works without a real supported interface.
+
+Do not create dead buttons.
+
+Do not leave unfinished navigation.
+
+Do not remove requested features to make development easier.
+
+Build the core first, test continuously, then expand.
+
+The final ChessHub should feel like a serious combination of:
+
+**Lichess + Chess.com + advanced chess analysis + bot trainer + opening explorer + game review + player profile + online ranked chess + training platform**, while remaining lightweight enough for low-end Android devices.

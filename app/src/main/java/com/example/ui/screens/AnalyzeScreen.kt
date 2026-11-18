@@ -23,8 +23,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.AddCircleOutline
 import androidx.compose.material.icons.filled.Assessment
 import androidx.compose.material.icons.filled.CloudDownload
+import androidx.compose.material.icons.filled.Create
 import androidx.compose.material.icons.filled.FirstPage
 import androidx.compose.material.icons.filled.FlipCameraAndroid
 import androidx.compose.material.icons.filled.LastPage
@@ -33,6 +35,8 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Psychology
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.Terminal
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -49,6 +53,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -61,14 +66,20 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.example.chess.BoardHighlight
 import com.example.chess.CastlingRights
 import com.example.chess.ChessBoardState
 import com.example.chess.ChessVariant
+import com.example.chess.MasterGamesCatalog
 import com.example.chess.Move
+import com.example.chess.MoveGenerator
 import com.example.chess.MoveNode
+import com.example.chess.OpeningBook
+import com.example.chess.PgnParser
 import com.example.chess.Piece
 import com.example.chess.PieceColor
 import com.example.chess.PieceType
+import com.example.chess.Square
 import com.example.data.local.AppSettings
 import com.example.data.local.CollectionEntity
 import com.example.data.local.LocalGameEntity
@@ -100,6 +111,13 @@ fun AnalyzeScreen(
     onToggleAutoplay: () -> Unit,
     onSetComment: (String) -> Unit,
     onToggleNag: (Int) -> Unit,
+    onToggleCircleSquare: (Square) -> Unit,
+    onToggleUserArrow: (Square, Square) -> Unit,
+    onClearAnnotations: () -> Unit,
+    onRunUciCommand: (String) -> Unit,
+    onRunUciBenchmark: () -> Unit,
+    onRestartUciEngine: () -> Unit,
+    onSaveCurrentAsPuzzle: (String, String, String, Int, String) -> Unit,
     onRunFullReview: () -> Unit,
     onFetchExplorer: (Boolean) -> Unit,
     onQueryTablebase: () -> Unit,
@@ -125,9 +143,10 @@ fun AnalyzeScreen(
         ScrollableTabRow(selectedTabIndex = selectedTab, edgePadding = 8.dp) {
             Tab(selected = selectedTab == 0, onClick = { selectedTab = 0 }, text = { Text("Analysis") })
             Tab(selected = selectedTab == 1, onClick = { selectedTab = 1 }, text = { Text("Game Review") })
-            Tab(selected = selectedTab == 2, onClick = { selectedTab = 2 }, text = { Text("Board Editor") })
-            Tab(selected = selectedTab == 3, onClick = { selectedTab = 3 }, text = { Text("Archive (${savedGames.size})") })
-            Tab(selected = selectedTab == 4, onClick = { selectedTab = 4 }, text = { Text("Studies (${studies.size})") })
+            Tab(selected = selectedTab == 2, onClick = { selectedTab = 2 }, text = { Text("Explore") })
+            Tab(selected = selectedTab == 3, onClick = { selectedTab = 3 }, text = { Text("Board Editor") })
+            Tab(selected = selectedTab == 4, onClick = { selectedTab = 4 }, text = { Text("Archive (${savedGames.size})") })
+            Tab(selected = selectedTab == 5, onClick = { selectedTab = 5 }, text = { Text("Studies (${studies.size})") })
         }
 
         when (selectedTab) {
@@ -146,6 +165,13 @@ fun AnalyzeScreen(
                 onToggleAutoplay = onToggleAutoplay,
                 onSetComment = onSetComment,
                 onToggleNag = onToggleNag,
+                onToggleCircleSquare = onToggleCircleSquare,
+                onToggleUserArrow = onToggleUserArrow,
+                onClearAnnotations = onClearAnnotations,
+                onRunUciCommand = onRunUciCommand,
+                onRunUciBenchmark = onRunUciBenchmark,
+                onRestartUciEngine = onRestartUciEngine,
+                onSaveCurrentAsPuzzle = onSaveCurrentAsPuzzle,
                 onFetchExplorer = onFetchExplorer,
                 onQueryTablebase = onQueryTablebase,
                 onSaveStudy = onSaveStudy,
@@ -159,9 +185,16 @@ fun AnalyzeScreen(
                 onRunReview = onRunFullReview,
                 onJumpToPly = onJumpToPly,
                 onPlayMove = onPlayMove,
+                onPlayFromPosition = onPlayFromPosition,
             )
-            2 -> BoardEditorTab(
+            2 -> ExploreMasterAndGambitsTab(
+                onLoadPgn = { pgn ->
+                    if (onImportPgn(pgn)) selectedTab = 0
+                },
+            )
+            3 -> BoardEditorTab(
                 initialFen = state.currentNode.state.toFen(),
+                settings = settings,
                 boardTheme = boardTheme,
                 onLoadToAnalysis = { fen ->
                     if (onLoadFen(fen)) selectedTab = 0
@@ -169,7 +202,7 @@ fun AnalyzeScreen(
                 onPlayFromFen = onPlayFromPosition,
                 onShareText = onShareText,
             )
-            3 -> ArchiveTab(
+            4 -> ArchiveTab(
                 savedGames = savedGames,
                 onLoadGame = { g ->
                     onLoadSavedGame(g)
@@ -220,6 +253,13 @@ private fun AnalysisBoardTab(
     onToggleAutoplay: () -> Unit,
     onSetComment: (String) -> Unit,
     onToggleNag: (Int) -> Unit,
+    onToggleCircleSquare: (Square) -> Unit,
+    onToggleUserArrow: (Square, Square) -> Unit,
+    onClearAnnotations: () -> Unit,
+    onRunUciCommand: (String) -> Unit,
+    onRunUciBenchmark: () -> Unit,
+    onRestartUciEngine: () -> Unit,
+    onSaveCurrentAsPuzzle: (String, String, String, Int, String) -> Unit,
     onFetchExplorer: (Boolean) -> Unit,
     onQueryTablebase: () -> Unit,
     onSaveStudy: (String, String) -> Unit,
@@ -228,6 +268,10 @@ private fun AnalysisBoardTab(
 ) {
     var commentDraft by remember(state.currentNode.id) { mutableStateOf(state.currentNode.comment) }
     var studyTitle by remember { mutableStateOf("") }
+    var annotationMode by remember { mutableStateOf(false) }
+    var showUciConsole by remember { mutableStateOf(false) }
+    var uciCommandInput by remember { mutableStateOf("go depth 2") }
+    var showSavePuzzleDialog by remember { mutableStateOf(false) }
 
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(horizontal = 12.dp),
@@ -240,12 +284,27 @@ private fun AnalysisBoardTab(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text(
-                    text = state.openingMatch?.let { "${it.eco} • ${it.name}" } ?: "Analysis Board",
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.weight(1f),
-                )
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = state.openingMatch?.let { "${it.eco} • ${it.name}" } ?: "Analysis Board",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    state.gambitMatch?.let { g ->
+                        Text(
+                            text = "Gambit: ${g.name} (${g.status})",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.secondary,
+                        )
+                    }
+                    state.endgameClassification?.let { eg ->
+                        Text(
+                            text = "Endgame: ${eg.label} • ${eg.keyPrinciple}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                    }
+                }
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text("Engine", style = MaterialTheme.typography.labelMedium)
                     Switch(
@@ -283,9 +342,17 @@ private fun AnalysisBoardTab(
                     showLegalMoves = settings.showLegalMoves,
                     showLastMove = settings.showLastMove,
                     autoQueen = settings.autoQueen,
+                    pieceStyleId = settings.pieceStyleId,
+                    moveAnimation = settings.moveAnimation,
+                    reducedAnimations = settings.reducedAnimations,
+                    animationSpeed = settings.animationSpeed,
+                    annotationMode = annotationMode && settings.allowBoardArrows,
                     lastMove = state.currentNode.move,
-                    arrows = state.arrows,
+                    arrows = state.arrows + state.userArrows,
+                    highlights = state.userCircleSquares.map { BoardHighlight(it, 0xCC10B981) },
                     onMoveSelected = onPlayMove,
+                    onToggleCircleSquare = onToggleCircleSquare,
+                    onToggleUserArrow = onToggleUserArrow,
                 )
             }
         }
@@ -305,6 +372,94 @@ private fun AnalysisBoardTab(
                 IconButton(onClick = onStepForward) { Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = "Forward") }
                 IconButton(onClick = onJumpEnd) { Icon(Icons.Default.LastPage, contentDescription = "End") }
                 IconButton(onClick = onToggleFlip) { Icon(Icons.Default.FlipCameraAndroid, contentDescription = "Flip") }
+            }
+        }
+
+        // Annotations, Save Puzzle, & UCI Console Quick Actions
+        item {
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                if (settings.allowBoardArrows) {
+                    FilterChip(
+                        selected = annotationMode,
+                        onClick = { annotationMode = !annotationMode },
+                        leadingIcon = { Icon(Icons.Default.Create, contentDescription = null, modifier = Modifier.size(16.dp)) },
+                        label = { Text(if (annotationMode) "Annotating Board" else "Draw Arrows/Circles") },
+                    )
+                    if (state.userArrows.isNotEmpty() || state.userCircleSquares.isNotEmpty()) {
+                        OutlinedButton(onClick = onClearAnnotations) { Text("Clear Marks") }
+                    }
+                }
+                OutlinedButton(onClick = { showSavePuzzleDialog = true }) {
+                    Icon(Icons.Default.AddCircleOutline, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text("Save as Puzzle")
+                }
+                FilterChip(
+                    selected = showUciConsole,
+                    onClick = { showUciConsole = !showUciConsole },
+                    leadingIcon = { Icon(Icons.Default.Terminal, contentDescription = null, modifier = Modifier.size(16.dp)) },
+                    label = { Text("UCI Console") },
+                    modifier = Modifier.testTag("toggle_uci_console_btn"),
+                )
+            }
+        }
+
+        // Collapsible Real UCI Protocol Engine Console
+        if (showUciConsole) {
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                ) {
+                    Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                "ChessHub Kotlin UCI Engine 2.0 (${if (state.uciRunning) "Ready" else "Stopped"})",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Bold,
+                            )
+                            TextButton(onClick = onRestartUciEngine) { Text("Restart UCI") }
+                        }
+                        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            OutlinedButton(onClick = onRunUciBenchmark) { Text("Analyze Position") }
+                            OutlinedButton(onClick = { onRunUciCommand("uci") }) { Text("uci") }
+                            OutlinedButton(onClick = { onRunUciCommand("isready") }) { Text("isready") }
+                            OutlinedButton(onClick = { onRunUciCommand("stop") }) { Text("stop") }
+                        }
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedTextField(
+                                value = uciCommandInput,
+                                onValueChange = { uciCommandInput = it },
+                                label = { Text("UCI Command") },
+                                modifier = Modifier.weight(1f).testTag("uci_command_input"),
+                                singleLine = true,
+                            )
+                            Button(onClick = {
+                                if (uciCommandInput.isNotBlank()) onRunUciCommand(uciCommandInput)
+                            }) { Text("Send") }
+                        }
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = MaterialTheme.colorScheme.surface,
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Column(modifier = Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                val lines = if (state.uciOutput.isEmpty()) listOf("id name ChessHub Kotlin UCI Engine 2.0 (tap 'Analyze Position' or send 'uci')") else state.uciOutput.takeLast(12)
+                                lines.forEach { line ->
+                                    Text(line, style = MaterialTheme.typography.labelSmall, fontFamily = FontFamily.Monospace)
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
 
@@ -470,8 +625,41 @@ private fun AnalysisBoardTab(
             Spacer(Modifier.height(16.dp))
         }
     }
+
+    if (showSavePuzzleDialog) {
+        val suggestedMove = state.engineLines.firstOrNull()?.pvMoves?.firstOrNull()?.uci ?: ""
+        var title by remember { mutableStateOf(state.openingMatch?.name?.let { "$it Tactic" } ?: "Analysis Tactic") }
+        var solutionUci by remember { mutableStateOf(suggestedMove) }
+        var theme by remember { mutableStateOf("Tactical") }
+        var ratingText by remember { mutableStateOf("1400") }
+        var hint by remember { mutableStateOf("Look for checks, captures, and undefended targets.") }
+
+        AlertDialog(
+            onDismissRequest = { showSavePuzzleDialog = false },
+            title = { Text("Save Position as Puzzle") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(value = title, onValueChange = { title = it }, label = { Text("Puzzle Title") }, singleLine = true)
+                    OutlinedTextField(value = solutionUci, onValueChange = { solutionUci = it }, label = { Text("Solution UCI (e.g. e2e4 or e2e4 e7e5)") }, singleLine = true)
+                    OutlinedTextField(value = theme, onValueChange = { theme = it }, label = { Text("Theme") }, singleLine = true)
+                    OutlinedTextField(value = ratingText, onValueChange = { ratingText = it.filter(Char::isDigit) }, label = { Text("Rating") }, singleLine = true)
+                    OutlinedTextField(value = hint, onValueChange = { hint = it }, label = { Text("Hint") })
+                }
+            },
+            confirmButton = {
+                Button(onClick = {
+                    onSaveCurrentAsPuzzle(title, solutionUci, theme, ratingText.toIntOrNull() ?: 1400, hint)
+                    showSavePuzzleDialog = false
+                }) { Text("Save") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showSavePuzzleDialog = false }) { Text("Cancel") }
+            },
+        )
+    }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun GameReviewTab(
     state: AnalysisUiState,
@@ -480,7 +668,10 @@ private fun GameReviewTab(
     onRunReview: () -> Unit,
     onJumpToPly: (Int) -> Unit,
     onPlayMove: (Move) -> Unit,
+    onPlayFromPosition: (String) -> Unit,
 ) {
+    var moveFilter by remember { mutableStateOf("All") }
+
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(14.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -507,7 +698,7 @@ private fun GameReviewTab(
         if (report == null) {
             item {
                 Text(
-                    "Import a PGN, load a game from Archive, or play moves on the Analysis board, then run Game Review for accuracy percentages, phase breakdown, move classifications, and mistake drills.",
+                    "Import a PGN, load a game from Archive, or play moves on the Analysis board, then run Game Review for accuracy percentages, phase breakdown, move classifications, Missed Wins/Mates, and full 10-point mistake explanations.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -530,7 +721,12 @@ private fun GameReviewTab(
                             style = MaterialTheme.typography.bodySmall,
                         )
                         Text(
-                            "White Mistakes/Blunders: ${report.whiteMistakes}/${report.whiteBlunders}  |  Black: ${report.blackMistakes}/${report.blackBlunders}",
+                            "White: ${report.whiteInaccuracies} Inacc • ${report.whiteMistakes} Mist • ${report.whiteBlunders} Blund • ${report.whiteMissedWins} Missed Win • ${report.whiteMissedMates} Missed Mate",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Text(
+                            "Black: ${report.blackInaccuracies} Inacc • ${report.blackMistakes} Mist • ${report.blackBlunders} Blund • ${report.blackMissedWins} Missed Win • ${report.blackMissedMates} Missed Mate",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -554,6 +750,10 @@ private fun GameReviewTab(
                         theme = boardTheme,
                         modifier = Modifier.widthIn(max = 420.dp),
                         showCoordinates = settings.showCoordinates,
+                        pieceStyleId = settings.pieceStyleId,
+                        moveAnimation = settings.moveAnimation,
+                        reducedAnimations = settings.reducedAnimations,
+                        animationSpeed = settings.animationSpeed,
                         lastMove = state.currentNode.move,
                         onMoveSelected = onPlayMove,
                     )
@@ -562,20 +762,61 @@ private fun GameReviewTab(
 
             item {
                 Text("Critical Moments & Move Classifications", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    listOf("All", "Mistakes & Blunders", "White", "Black").forEach { f ->
+                        FilterChip(selected = moveFilter == f, onClick = { moveFilter = f }, label = { Text(f) })
+                    }
+                }
             }
-            items(report.moves, key = { it.ply }) { rm ->
+
+            val filteredMoves = report.moves.filter { rm ->
+                when (moveFilter) {
+                    "Mistakes & Blunders" -> rm.mistakeBreakdown != null || rm.isCriticalMoment
+                    "White" -> rm.ply % 2 == 1
+                    "Black" -> rm.ply % 2 == 0
+                    else -> true
+                }
+            }
+
+            items(filteredMoves, key = { it.ply }) { rm ->
                 Surface(
                     modifier = Modifier.fillMaxWidth().clickable { onJumpToPly(rm.ply) },
                     shape = RoundedCornerShape(8.dp),
-                    color = if (rm.isCriticalMoment) MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.4f) else MaterialTheme.colorScheme.surface,
+                    color = if (rm.isCriticalMoment) MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.35f) else MaterialTheme.colorScheme.surface,
                     border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                 ) {
-                    Column(modifier = Modifier.padding(10.dp)) {
+                    Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                             Text("${rm.ply}. ${rm.san} ${rm.quality.symbol}", fontWeight = FontWeight.SemiBold)
                             Text("${rm.quality.label} (-${rm.cpLoss} cp)", style = MaterialTheme.typography.labelSmall)
                         }
                         Text(rm.coachExplanation, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+
+                        rm.mistakeBreakdown?.let { bd ->
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f),
+                                modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                            ) {
+                                Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                                    Text("Why Was This a Mistake?", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.error)
+                                    Text("1. Played: ${bd.movePlayedSan}  |  2. Better Move: ${bd.bestMoveSan}", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold)
+                                    Text("3. Eval Shift: ${bd.evalBeforeFormatted} -> ${bd.evalAfterFormatted}", style = MaterialTheme.typography.bodySmall)
+                                    Text("4. What Changed: ${bd.whatChanged}", style = MaterialTheme.typography.bodySmall)
+                                    Text("5. Opponent Threat: ${bd.opponentThreatCreated}", style = MaterialTheme.typography.bodySmall)
+                                    Text("6. Tactical Reason: ${bd.tacticalReason}", style = MaterialTheme.typography.bodySmall)
+                                    Text("7. Material Impact: ${bd.materialConsequence}", style = MaterialTheme.typography.bodySmall)
+                                    Text("8. Positional Note: ${bd.positionExplanation}", style = MaterialTheme.typography.bodySmall)
+                                    Text("9. Improvement: ${bd.suggestedImprovement}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
+                                    OutlinedButton(
+                                        onClick = { onPlayFromPosition(rm.fenBefore) },
+                                        modifier = Modifier.padding(top = 4.dp),
+                                    ) {
+                                        Text("10. Retry / Practice Position")
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -583,10 +824,86 @@ private fun GameReviewTab(
     }
 }
 
+@Composable
+private fun ExploreMasterAndGambitsTab(
+    onLoadPgn: (String) -> Unit,
+) {
+    var section by remember { mutableIntStateOf(0) }
+
+    LazyColumn(
+        modifier = Modifier.fillMaxSize().padding(14.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        item {
+            Text("ChessHub Explore & Repertoire", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 6.dp)) {
+                FilterChip(selected = section == 0, onClick = { section = 0 }, label = { Text("Master Games (${MasterGamesCatalog.FAMOUS_GAMES.size})") })
+                FilterChip(selected = section == 1, onClick = { section = 1 }, label = { Text("Named Gambits (${OpeningBook.NAMED_GAMBITS.size})") })
+            }
+        }
+
+        if (section == 0) {
+            items(MasterGamesCatalog.FAMOUS_GAMES, key = { it.id }) { game ->
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                ) {
+                    Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(game.title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                        Text("${game.white} vs ${game.black} (${game.year}) • ${game.eco} ${game.opening} • ${game.result}", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                        Text(game.summary, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        FilledTonalButton(onClick = { onLoadPgn(game.pgn) }) {
+                            Text("Watch & Analyze")
+                        }
+                    }
+                }
+            }
+        } else {
+            items(OpeningBook.NAMED_GAMBITS, key = { it.name }) { gambit ->
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                ) {
+                    Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text("${gambit.eco} • ${gambit.name}", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                            Text(gambit.side, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.secondary)
+                        }
+                        Text(gambit.recommendedIdeas, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        OutlinedButton(onClick = {
+                            val pgn = buildPgnFromUciList(gambit.name, gambit.acceptedLineUci)
+                            onLoadPgn(pgn)
+                        }) {
+                            Text("Explore Gambit Line")
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+private fun buildPgnFromUciList(title: String, uciMoves: List<String>): String {
+    var st = ChessBoardState.standard()
+    val root = MoveNode(state = st, move = null, san = "")
+    var curr = root
+    for (uci in uciMoves) {
+        val legal = MoveGenerator.legalMoves(st)
+        val mv = legal.firstOrNull { it.uci == uci } ?: break
+        val san = MoveGenerator.toSan(st, mv, legal)
+        st = MoveGenerator.applyMoveUnchecked(st, mv)
+        curr = curr.addOrGetChild(mv, san, st)
+    }
+    return PgnParser.exportPgn(root, mapOf("Event" to title), "*")
+}
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun BoardEditorTab(
     initialFen: String,
+    settings: AppSettings,
     boardTheme: com.example.ui.theme.BoardThemeColors,
     onLoadToAnalysis: (String) -> Unit,
     onPlayFromFen: (String) -> Unit,
@@ -628,6 +945,8 @@ private fun BoardEditorTab(
                     theme = boardTheme,
                     modifier = Modifier.widthIn(max = 460.dp),
                     interactive = true,
+                    pieceStyleId = settings.pieceStyleId,
+                    moveAnimation = false,
                     onSquareTappedRaw = { sq ->
                         val nextBoard = editorState.board.copyOf()
                         nextBoard[sq.index] = selectedBrush
@@ -649,7 +968,7 @@ private fun BoardEditorTab(
                     ) {
                         Box(contentAlignment = Alignment.Center) {
                             if (piece == null) Text("Del", style = MaterialTheme.typography.labelSmall)
-                            else PieceMiniIcon(piece = piece, modifier = Modifier.size(34.dp))
+                            else PieceMiniIcon(piece = piece, modifier = Modifier.size(34.dp), pieceStyleId = settings.pieceStyleId)
                         }
                     }
                 }
