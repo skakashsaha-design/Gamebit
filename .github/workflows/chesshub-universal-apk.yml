@@ -16,14 +16,14 @@ concurrency:
 
 jobs:
   build-universal-apk:
-    name: Build Universal APK
+    name: Build Universal Debug APK
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up JDK 21 (Temurin)
+      - name: Set up JDK 21
         uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -32,32 +32,34 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Install Android 36.1 SDK & Accept Licenses
+      - name: Install Android SDK
         shell: bash
         run: |
           SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+
           SDK_MANAGER="$(command -v sdkmanager || find "$SDK_ROOT" -maxdepth 5 -name sdkmanager -type f 2>/dev/null | head -n 1)"
+
           if [ -z "$SDK_MANAGER" ]; then
-            echo "ERROR: sdkmanager not found under $SDK_ROOT"
+            echo "ERROR: sdkmanager not found"
             exit 1
           fi
+
           echo "Using sdkmanager: $SDK_MANAGER"
-          yes | "$SDK_MANAGER" --sdk_root="$SDK_ROOT" --licenses > /dev/null 2>&1 || true
+
+          yes | "$SDK_MANAGER" --sdk_root="$SDK_ROOT" --licenses >/dev/null 2>&1 || true
+
           "$SDK_MANAGER" --sdk_root="$SDK_ROOT" \
             "platform-tools" \
-            "platforms;android-36.1" \
             "platforms;android-36" \
             "build-tools;36.0.0"
 
-      - name: Set up Gradle 9.3.1
+      - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '9.3.1'
 
-      - name: Prepare .env, Debug Keystore & Optional Firebase Config
+      - name: Prepare project
         shell: bash
-        env:
-          GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
         run: |
           gradle --version
 
@@ -68,10 +70,14 @@ jobs:
           if [ ! -f debug.keystore ]; then
             if [ -f debug.keystore.base64 ]; then
               tr -d '[:space:]' < debug.keystore.base64 | base64 -d > debug.keystore || rm -f debug.keystore
-              if [ -f debug.keystore ] && ! keytool -list -keystore debug.keystore -storepass android >/dev/null 2>&1; then
+
+              if [ -f debug.keystore ] && ! keytool -list \
+                -keystore debug.keystore \
+                -storepass android >/dev/null 2>&1; then
                 rm -f debug.keystore
               fi
             fi
+
             if [ ! -f debug.keystore ]; then
               keytool -genkeypair -v \
                 -keystore debug.keystore \
@@ -85,65 +91,72 @@ jobs:
             fi
           fi
 
-          if [ -n "${GOOGLE_SERVICES_JSON:-}" ]; then
-            printf '%s' "$GOOGLE_SERVICES_JSON" > app/google-services.json
+      - name: Build Debug APK
+        shell: bash
+        run: |
+          gradle :app:assembleDebug \
+            --no-daemon \
+            --stacktrace \
+            -Dorg.gradle.workers.max=2 \
+            "-Dorg.gradle.jvmargs=-Xmx2560m -XX:MaxMetaspaceSize=768m -Dfile.encoding=UTF-8"
+
+      - name: Verify APK
+        shell: bash
+        run: |
+          APK="app/build/outputs/apk/debug/app-debug.apk"
+
+          if [ ! -f "$APK" ]; then
+            echo "ERROR: APK was not generated"
+            echo ""
+            echo "Available APK files:"
+            find app/build/outputs -type f -name "*.apk" -print 2>/dev/null || true
+            exit 1
           fi
 
-      - name: Build Universal Debug APK (single APK, all ABIs)
-        run: gradle :app:assembleDebug --no-daemon -Dorg.gradle.workers.max=2 "-Dorg.gradle.jvmargs=-Xmx2560m -XX:MaxMetaspaceSize=768m -Dfile.encoding=UTF-8"
+          echo "APK successfully generated:"
+          ls -lh "$APK"
 
-      - name: Build Signed Universal Release APK (when release secrets exist)
-        if: ${{ secrets.KEYSTORE_BASE64 != '' && secrets.STORE_PASSWORD != '' && secrets.KEY_PASSWORD != '' }}
-        shell: bash
-        env:
-          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
-          STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
-          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
-          KEYSTORE_PATH: ${{ github.workspace }}/my-upload-key.jks
-        run: |
-          trap 'rm -f "$KEYSTORE_PATH"' EXIT
-          printf '%s' "$KEYSTORE_BASE64" | tr -d '[:space:]' | base64 -d > "$KEYSTORE_PATH"
-          gradle :app:assembleRelease --no-daemon -Dorg.gradle.workers.max=2 "-Dorg.gradle.jvmargs=-Xmx2560m -XX:MaxMetaspaceSize=768m -Dfile.encoding=UTF-8"
-
-      - name: Package & Verify Universal APK Artifacts
+      - name: Package APK
         shell: bash
         run: |
           mkdir -p dist
-          if [ ! -f app/build/outputs/apk/debug/app-debug.apk ]; then
-            echo "ERROR: app/build/outputs/apk/debug/app-debug.apk not found"
-            exit 1
-          fi
-          cp app/build/outputs/apk/debug/app-debug.apk dist/ChessHub-universal-debug.apk
 
-          if [ -f app/build/outputs/apk/release/app-release.apk ]; then
-            cp app/build/outputs/apk/release/app-release.apk dist/ChessHub-universal-release.apk
-          fi
+          cp \
+            app/build/outputs/apk/debug/app-debug.apk \
+            dist/ChessHub-debug.apk
 
+          sha256sum dist/ChessHub-debug.apk > dist/SHA256SUMS.txt
+
+          echo ""
+          echo "=== APK ==="
           ls -lh dist/
-          sha256sum dist/*.apk > dist/SHA256SUMS.txt
+
+          echo ""
+          echo "=== SHA-256 ==="
           cat dist/SHA256SUMS.txt
 
           {
-            echo "## ChessHub Universal APK Build Summary"
+            echo "## ChessHub APK"
             echo ""
             echo "| Artifact | Size | SHA-256 |"
-            echo "|---|---|---|"
-            for apk in dist/*.apk; do
-              name="$(basename "$apk")"
-              size="$(du -h "$apk" | cut -f1)"
-              hash="$(sha256sum "$apk" | awk '{print $1}')"
-              echo "| \`$name\` | $size | \`$hash\` |"
-            done
+            echo "|---|---:|---|"
+
+            APK="dist/ChessHub-debug.apk"
+            SIZE="$(du -h "$APK" | cut -f1)"
+            HASH="$(sha256sum "$APK" | awk '{print $1}')"
+
+            echo "| \`ChessHub-debug.apk\` | $SIZE | \`$HASH\` |"
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Upload Universal APK Artifacts
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: ChessHub-Universal-APK
+          name: ChessHub-APK
           path: |
-            dist/*.apk
+            dist/ChessHub-debug.apk
             dist/SHA256SUMS.txt
           retention-days: 30
+
 
   test-and-lint:
     name: Unit Tests & Android Lint
@@ -153,7 +166,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up JDK 21 (Temurin)
+      - name: Set up JDK 21
         uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -162,55 +175,64 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Install Android 36.1 SDK & Accept Licenses
+      - name: Install Android SDK
         shell: bash
         run: |
           SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+
           SDK_MANAGER="$(command -v sdkmanager || find "$SDK_ROOT" -maxdepth 5 -name sdkmanager -type f 2>/dev/null | head -n 1)"
+
           if [ -z "$SDK_MANAGER" ]; then
-            echo "ERROR: sdkmanager not found under $SDK_ROOT"
+            echo "ERROR: sdkmanager not found"
             exit 1
           fi
-          yes | "$SDK_MANAGER" --sdk_root="$SDK_ROOT" --licenses > /dev/null 2>&1 || true
+
+          yes | "$SDK_MANAGER" --sdk_root="$SDK_ROOT" --licenses >/dev/null 2>&1 || true
+
           "$SDK_MANAGER" --sdk_root="$SDK_ROOT" \
             "platform-tools" \
-            "platforms;android-36.1" \
             "platforms;android-36" \
             "build-tools;36.0.0"
 
-      - name: Set up Gradle 9.3.1
+      - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '9.3.1'
 
-      - name: Prepare .env & Debug Keystore
+      - name: Prepare project
         shell: bash
         run: |
           if [ ! -f .env ] && [ -f .env.example ]; then
             cp .env.example .env
           fi
+
           if [ ! -f debug.keystore ]; then
-            if [ -f debug.keystore.base64 ]; then
-              tr -d '[:space:]' < debug.keystore.base64 | base64 -d > debug.keystore || rm -f debug.keystore
-            fi
-            if [ ! -f debug.keystore ]; then
-              keytool -genkeypair -v \
-                -keystore debug.keystore \
-                -storepass android \
-                -alias androiddebugkey \
-                -keypass android \
-                -keyalg RSA \
-                -keysize 2048 \
-                -validity 10000 \
-                -dname "CN=Android Debug,O=Android,C=US"
-            fi
+            keytool -genkeypair -v \
+              -keystore debug.keystore \
+              -storepass android \
+              -alias androiddebugkey \
+              -keypass android \
+              -keyalg RSA \
+              -keysize 2048 \
+              -validity 10000 \
+              -dname "CN=Android Debug,O=Android,C=US"
           fi
 
-      - name: Run Unit and Robolectric Tests
-        run: gradle :app:testDebugUnitTest --no-daemon -Dorg.gradle.workers.max=2 "-Dorg.gradle.jvmargs=-Xmx2560m -XX:MaxMetaspaceSize=768m -Dfile.encoding=UTF-8"
+      - name: Run Unit Tests
+        run: |
+          gradle :app:testDebugUnitTest \
+            --no-daemon \
+            --stacktrace \
+            -Dorg.gradle.workers.max=2 \
+            "-Dorg.gradle.jvmargs=-Xmx2560m -XX:MaxMetaspaceSize=768m -Dfile.encoding=UTF-8"
 
       - name: Run Android Lint
-        run: gradle :app:lintDebug --no-daemon -Dorg.gradle.workers.max=2 "-Dorg.gradle.jvmargs=-Xmx2560m -XX:MaxMetaspaceSize=768m -Dfile.encoding=UTF-8"
+        run: |
+          gradle :app:lintDebug \
+            --no-daemon \
+            --stacktrace \
+            -Dorg.gradle.workers.max=2 \
+            "-Dorg.gradle.jvmargs=-Xmx2560m -XX:MaxMetaspaceSize=768m -Dfile.encoding=UTF-8"
 
       - name: Upload Test & Lint Reports
         if: always()
