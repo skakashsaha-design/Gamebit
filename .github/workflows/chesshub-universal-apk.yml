@@ -2,9 +2,9 @@ name: ChessHub Universal APK CI
 
 on:
   push:
-    branches: [ main, master ]
+    branches:
+      - '**'
   pull_request:
-    branches: [ main, master ]
   workflow_dispatch:
 
 permissions:
@@ -16,14 +16,14 @@ concurrency:
 
 jobs:
   build-universal-apk:
-    name: Test, Lint & Build Universal APK
+    name: Build Universal APK
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up JDK 21 (required for AGP 9.1.1 & Gradle 9.3.1)
+      - name: Set up JDK 21 (Temurin)
         uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -32,31 +32,47 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Accept Android SDK licenses and ensure API 36 SDK
+      - name: Install Android 36.1 SDK & Accept Licenses
         shell: bash
         run: |
-          SDK_MANAGER="${ANDROID_HOME:-$ANDROID_SDK_ROOT}/cmdline-tools/latest/bin/sdkmanager"
-          if [ -x "$SDK_MANAGER" ]; then
-            yes | "$SDK_MANAGER" --licenses > /dev/null 2>&1 || true
-            "$SDK_MANAGER" "platforms;android-36" "build-tools;36.0.0" || true
+          SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          SDK_MANAGER="$(command -v sdkmanager || find "$SDK_ROOT" -maxdepth 5 -name sdkmanager -type f 2>/dev/null | head -n 1)"
+          if [ -z "$SDK_MANAGER" ]; then
+            echo "ERROR: sdkmanager not found under $SDK_ROOT"
+            exit 1
           fi
+          echo "Using sdkmanager: $SDK_MANAGER"
+          yes | "$SDK_MANAGER" --sdk_root="$SDK_ROOT" --licenses > /dev/null 2>&1 || true
+          "$SDK_MANAGER" --sdk_root="$SDK_ROOT" \
+            "platform-tools" \
+            "platforms;android-36.1" \
+            "platforms;android-36" \
+            "build-tools;36.0.0"
 
       - name: Set up Gradle 9.3.1
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '9.3.1'
 
-      - name: Prepare Secrets plugin .env, debug keystore, and optional Firebase config
+      - name: Prepare .env, Debug Keystore & Optional Firebase Config
         shell: bash
+        env:
+          GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
         run: |
+          gradle --version
+
           if [ ! -f .env ] && [ -f .env.example ]; then
             cp .env.example .env
           fi
 
           if [ ! -f debug.keystore ]; then
             if [ -f debug.keystore.base64 ]; then
-              base64 -d debug.keystore.base64 > debug.keystore
-            else
+              tr -d '[:space:]' < debug.keystore.base64 | base64 -d > debug.keystore || rm -f debug.keystore
+              if [ -f debug.keystore ] && ! keytool -list -keystore debug.keystore -storepass android >/dev/null 2>&1; then
+                rm -f debug.keystore
+              fi
+            fi
+            if [ ! -f debug.keystore ]; then
               keytool -genkeypair -v \
                 -keystore debug.keystore \
                 -storepass android \
@@ -72,19 +88,11 @@ jobs:
           if [ -n "${GOOGLE_SERVICES_JSON:-}" ]; then
             printf '%s' "$GOOGLE_SERVICES_JSON" > app/google-services.json
           fi
-        env:
-          GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
 
-      - name: Run Unit and Robolectric Tests
-        run: gradle :app:testDebugUnitTest --no-daemon
+      - name: Build Universal Debug APK (single APK, all ABIs)
+        run: gradle :app:assembleDebug --no-daemon -Dorg.gradle.workers.max=2 "-Dorg.gradle.jvmargs=-Xmx2560m -XX:MaxMetaspaceSize=768m -Dfile.encoding=UTF-8"
 
-      - name: Run Android Lint
-        run: gradle :app:lintDebug --no-daemon
-
-      - name: Build Universal Debug APK (single APK, no ABI splits)
-        run: gradle :app:assembleDebug --no-daemon
-
-      - name: Build Signed Universal Release APK (when release signing secrets are set)
+      - name: Build Signed Universal Release APK (when release secrets exist)
         if: ${{ secrets.KEYSTORE_BASE64 != '' && secrets.STORE_PASSWORD != '' && secrets.KEY_PASSWORD != '' }}
         shell: bash
         env:
@@ -94,10 +102,10 @@ jobs:
           KEYSTORE_PATH: ${{ github.workspace }}/my-upload-key.jks
         run: |
           trap 'rm -f "$KEYSTORE_PATH"' EXIT
-          printf '%s' "$KEYSTORE_BASE64" | base64 -d > "$KEYSTORE_PATH"
-          gradle :app:assembleRelease --no-daemon
+          printf '%s' "$KEYSTORE_BASE64" | tr -d '[:space:]' | base64 -d > "$KEYSTORE_PATH"
+          gradle :app:assembleRelease --no-daemon -Dorg.gradle.workers.max=2 "-Dorg.gradle.jvmargs=-Xmx2560m -XX:MaxMetaspaceSize=768m -Dfile.encoding=UTF-8"
 
-      - name: Package and verify Universal APK artifacts
+      - name: Package & Verify Universal APK Artifacts
         shell: bash
         run: |
           mkdir -p dist
@@ -137,7 +145,74 @@ jobs:
             dist/SHA256SUMS.txt
           retention-days: 30
 
-      - name: Upload Test and Lint Reports
+  test-and-lint:
+    name: Unit Tests & Android Lint
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21 (Temurin)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android 36.1 SDK & Accept Licenses
+        shell: bash
+        run: |
+          SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          SDK_MANAGER="$(command -v sdkmanager || find "$SDK_ROOT" -maxdepth 5 -name sdkmanager -type f 2>/dev/null | head -n 1)"
+          if [ -z "$SDK_MANAGER" ]; then
+            echo "ERROR: sdkmanager not found under $SDK_ROOT"
+            exit 1
+          fi
+          yes | "$SDK_MANAGER" --sdk_root="$SDK_ROOT" --licenses > /dev/null 2>&1 || true
+          "$SDK_MANAGER" --sdk_root="$SDK_ROOT" \
+            "platform-tools" \
+            "platforms;android-36.1" \
+            "platforms;android-36" \
+            "build-tools;36.0.0"
+
+      - name: Set up Gradle 9.3.1
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.3.1'
+
+      - name: Prepare .env & Debug Keystore
+        shell: bash
+        run: |
+          if [ ! -f .env ] && [ -f .env.example ]; then
+            cp .env.example .env
+          fi
+          if [ ! -f debug.keystore ]; then
+            if [ -f debug.keystore.base64 ]; then
+              tr -d '[:space:]' < debug.keystore.base64 | base64 -d > debug.keystore || rm -f debug.keystore
+            fi
+            if [ ! -f debug.keystore ]; then
+              keytool -genkeypair -v \
+                -keystore debug.keystore \
+                -storepass android \
+                -alias androiddebugkey \
+                -keypass android \
+                -keyalg RSA \
+                -keysize 2048 \
+                -validity 10000 \
+                -dname "CN=Android Debug,O=Android,C=US"
+            fi
+          fi
+
+      - name: Run Unit and Robolectric Tests
+        run: gradle :app:testDebugUnitTest --no-daemon -Dorg.gradle.workers.max=2 "-Dorg.gradle.jvmargs=-Xmx2560m -XX:MaxMetaspaceSize=768m -Dfile.encoding=UTF-8"
+
+      - name: Run Android Lint
+        run: gradle :app:lintDebug --no-daemon -Dorg.gradle.workers.max=2 "-Dorg.gradle.jvmargs=-Xmx2560m -XX:MaxMetaspaceSize=768m -Dfile.encoding=UTF-8"
+
+      - name: Upload Test & Lint Reports
         if: always()
         uses: actions/upload-artifact@v4
         with:
