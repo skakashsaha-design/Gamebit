@@ -2,7 +2,7 @@
 
 # ♟️ ChessHub (`v2.0.0`)
 
-**Offline-first Android chess platform built with Kotlin, Jetpack Compose, Material 3, Room v2, and Firebase.**
+**Offline-first Android chess platform built with Kotlin, Jetpack Compose, Material 3, Room v2, and a modular REST + WebSocket online backend.**
 
 ![Kotlin](https://img.shields.io/badge/Kotlin-2.2.10-7F52FF?style=for-the-badge&logo=kotlin&logoColor=white)
 ![Jetpack Compose](https://img.shields.io/badge/Jetpack_Compose-Material_3-4285F4?style=for-the-badge&logo=jetpackcompose&logoColor=white)
@@ -37,7 +37,7 @@
 - **Room v2 Puzzle Database** — `ChessPuzzleEntity` + `ChessPuzzleDao` + verified `MIGRATION_1_2` storing FEN strings, UCI solutions, difficulty ratings, bookmarks, and attempt stats.
 - **20 Checkmate Patterns & Trainers** — Rated Glicko-2 tactics, Daily Puzzle, Streak, Storm, Racer, 12 Named Gambits, 7 Opening Drills, Lessons, Endgame Trainer, and 30s Coordinate Trainer.
 - **Focus Music Player & Chess News** — Built-in PCM ambient chord synth (`AudioTrack`) + Storage Access Framework local tracks, 8 independent SFX toggles, TTS coaches, and Room-cached Lichess RSS news.
-- **Player Profile & Online Sync** — Hero Profile card, offline Local Game History, piece avatars, badges, 40+ settings, **EN / বাংলা (Bengali)** localization, Credential Manager Google Sign-In, Cloud Firestore matchmaking, and read-only Lichess / Chess.com lookups.
+- **Player Profile & Online Sync** — Hero Profile card, offline Local Game History, piece avatars, real activity-based badges & achievements, 40+ settings, **EN / বাংলা (Bengali)** localization, configurable ChessHub Server REST + WebSocket online play with reconnection & presence, and read-only Lichess / Chess.com lookups.
 
 </td>
 </tr>
@@ -53,7 +53,7 @@
 | **State & Concurrency** | MVVM (`ViewModel`, `StateFlow`, `collectAsStateWithLifecycle`), Kotlin Coroutines & Flows |
 | **Chess Core** | Pure-Kotlin `MoveGenerator`, `LocalChessEngine`, `ChessEngine` (Alpha-Beta + Quiescence + TT), `UciChessEngine`, `PgnParser` (RAV), `Glicko2RatingSystem`, `OpeningBook` |
 | **Local Persistence** | Room Database v2 (`9` entities, `3` DAOs, `MIGRATION_1_2`), Jetpack Preferences DataStore (`40+` settings) |
-| **Cloud & APIs** | Firebase Auth (Credential Manager Google Sign-In), Cloud Firestore (zero-trust `firestore.rules`), Retrofit + OkHttp + Moshi (Lichess & Chess.com public APIs) |
+| **Cloud & APIs** | Modular ChessHub REST/HTTPS (`Retrofit` + `Moshi`) & real-time WebSocket (`OkHttp`) backend client (server-authoritative moves, clocks, matchmaking & ratings, presence, reconnection), DataStore token session (`HttpAuthRepository`), plus read-only Lichess & Chess.com public APIs |
 | **Low-RAM Support** | Automatic `ActivityManager.isLowRamDevice` / `<= 1.4 GB` scaling for hash tables, Multi-PV, animations, and audio buffers (`minSdk 24`) |
 
 ---
@@ -96,14 +96,14 @@ The workflow in [`.github/workflows/chesshub-universal-apk.yml`](.github/workflo
 | **`Build Universal APK`** | Sets up JDK 21, Android SDK (`platforms;android-36.1`, `platforms;android-36`, `build-tools;36.0.0`), Gradle `9.3.1`, `.env`, and `debug.keystore`, then builds `ChessHub-universal-debug.apk` (+ signed release APK if secrets are set) with SHA-256 summary | `ChessHub-Universal-APK` |
 | **`Unit Tests & Android Lint`** | Executes `:app:testDebugUnitTest` and `:app:lintDebug` with CI-tuned JVM heap limits | `ChessHub-Reports` |
 
-To enable signed Release APKs in GitHub Actions, configure repository secrets: `KEYSTORE_BASE64`, `STORE_PASSWORD`, `KEY_PASSWORD` (and optionally `GOOGLE_SERVICES_JSON`).
+To enable signed Release APKs in GitHub Actions, configure repository secrets: `KEYSTORE_BASE64`, `STORE_PASSWORD`, and `KEY_PASSWORD`.
 
 ---
 
 ## 📌 Honest Implementation Notes
 
 - **Pure-Kotlin Engine (No C++ Stockfish Binary):** Local play, difficulty tiers, game review, and the UCI console run on the built-in pure-Kotlin engine (`ChessHub Kotlin Chess Engine 2.0`), without bundling a native Stockfish C++ executable.
-- **Online & External Features:** Real-time matchmaking, chat, tournaments, and cloud studies require Google Sign-In + Firebase Firestore; external player lookups, opening explorer, tablebase, and live chess news require internet access.
+- **Online & External Features:** Real-time matchmaking, server-authoritative games, chat, tournaments, presence, and cloud studies connect to a configurable ChessHub REST + WebSocket server via `ChessHubBackendApi` and `ChessHubWebSocketClient`; external player lookups, opening explorer, tablebase, and live chess news require internet access.
 
 ---
 
@@ -112,7 +112,7 @@ To enable signed Release APKs in GitHub Actions, configure repository secrets: `
 | Document | Description |
 |---|---|
 | [`ARCHITECTURE.md`](ARCHITECTURE.md) | Layer, package & module architecture |
-| [`DATABASE_SCHEMA.md`](DATABASE_SCHEMA.md) | Room v2 entities, DAOs, `MIGRATION_1_2`, DataStore & Firestore schemas |
+| [`DATABASE_SCHEMA.md`](DATABASE_SCHEMA.md) | Room v2 entities, DAOs, `MIGRATION_1_2`, DataStore & REST/WebSocket schemas |
 | [`FEATURE_STATUS.md`](FEATURE_STATUS.md) | Complete feature & verification matrix |
 | [`TESTING_REPORT.md`](TESTING_REPORT.md) | Test suites, Android Lint & Universal APK build verification |
 | [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) | Open-source licenses & public API attributions |

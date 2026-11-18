@@ -10,7 +10,6 @@ import com.example.chess.MoveGenerator
 import com.example.chess.PieceColor
 import com.example.chess.TimeControl
 import com.example.data.remote.AbuseReportDoc
-import com.example.data.remote.ChessHubOnlineRepository
 import com.example.data.remote.CloudStudyDoc
 import com.example.data.remote.ClubDoc
 import com.example.data.remote.DirectMessageDoc
@@ -22,13 +21,15 @@ import com.example.data.remote.ExternalTvChannel
 import com.example.data.remote.FriendshipDoc
 import com.example.data.remote.GameChatMessageDoc
 import com.example.data.remote.MessageThreadDoc
+import com.example.data.remote.OnlineChessRepository
 import com.example.data.remote.OnlineGameDoc
 import com.example.data.remote.PublicProfileDoc
 import com.example.data.remote.RatingDeltaResult
+import com.example.data.remote.RatingHistoryPoint
 import com.example.data.remote.TeamDoc
 import com.example.data.remote.TournamentDoc
 import com.example.data.remote.TournamentEntryDoc
-import com.google.firebase.firestore.FirebaseFirestoreException
+import com.example.data.remote.WebSocketConnectionState
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.Flow
@@ -39,7 +40,6 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
-import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 sealed interface UiState<out T> {
@@ -49,13 +49,15 @@ sealed interface UiState<out T> {
 }
 
 class OnlineViewModel(
-    private val repo: ChessHubOnlineRepository,
+    private val repo: OnlineChessRepository,
     private val externalApis: ExternalChessApis,
     val currentUserId: String,
     initialDisplayName: String,
     countryIso: String,
     fideFederation: String,
 ) : ViewModel() {
+
+    val connectionState: StateFlow<WebSocketConnectionState> = repo.connectionState
 
     private val _statusMessage = MutableStateFlow<String?>(null)
     val statusMessage: StateFlow<String?> = _statusMessage.asStateFlow()
@@ -95,6 +97,9 @@ class OnlineViewModel(
 
     private val _lastRatingDelta = MutableStateFlow<RatingDeltaResult?>(null)
     val lastRatingDelta: StateFlow<RatingDeltaResult?> = _lastRatingDelta.asStateFlow()
+
+    private val _ratingHistory = MutableStateFlow<List<RatingHistoryPoint>>(emptyList())
+    val ratingHistory: StateFlow<List<RatingHistoryPoint>> = _ratingHistory.asStateFlow()
 
     private val _chessNews = MutableStateFlow<List<ExternalChessNewsItem>>(emptyList())
     val chessNews: StateFlow<List<ExternalChessNewsItem>> = _chessNews.asStateFlow()
@@ -149,9 +154,12 @@ class OnlineViewModel(
     private var dmJob: Job? = null
 
     init {
+        repo.connectRealtime()
         viewModelScope.launch {
             repo.ensureUserInitialized(initialDisplayName, countryIso, fideFederation)
-                .onFailure { _statusMessage.value = "Sync note: ${it.localizedMessage}" }
+                .onFailure { _statusMessage.value = "Server sync: ${it.localizedMessage}" }
+            repo.updatePresence("online")
+            repo.fetchRatingHistory(currentUserId).onSuccess { _ratingHistory.value = it }
             _isAdmin.value = repo.checkIsAdmin()
         }
     }
@@ -160,18 +168,29 @@ class OnlineViewModel(
         _statusMessage.value = null
     }
 
+    fun reconnectActiveGame() {
+        val gameId = _activeGameId.value
+        if (gameId != null) {
+            viewModelScope.launch {
+                repo.reconnectActiveGame(gameId)
+                    .onSuccess {
+                        _activeGameDoc.value = it
+                        _statusMessage.value = "Reconnected to live game"
+                    }
+                    .onFailure { _statusMessage.value = "Reconnect failed: ${it.localizedMessage}" }
+            }
+        } else {
+            repo.connectRealtime()
+        }
+    }
+
     fun startQuickMatchmaking(
         variant: ChessVariant,
         timeControl: TimeControl,
         rated: Boolean,
     ) {
-        val prof = (myProfile.value as? UiState.Success)?.data
-        val username = prof?.username ?: "Player"
-        val rating = (prof?.blitzRating ?: 1500L).toInt()
         viewModelScope.launch {
             val res = repo.findOrCreateMatch(
-                username = username,
-                rating = rating,
                 variant = variant,
                 timeControl = timeControl.label,
                 initialTimeMs = timeControl.initialSeconds * 1000L,
@@ -180,16 +199,17 @@ class OnlineViewModel(
                 ratedGame = rated,
             )
             res.fold(
-                onSuccess = { result ->
-                    if (result.startsWith("WAITING:")) {
-                        val ticketId = result.removePrefix("WAITING:")
+                onSuccess = { response ->
+                    val matchedGame = response.game
+                    if (response.status == "matched" && matchedGame != null) {
+                        _searchingTicketId.value = null
+                        openOnlineGame(matchedGame.id)
+                        _statusMessage.value = "Match found!"
+                    } else if (response.ticket != null) {
+                        val ticketId = response.ticket.id
                         _searchingTicketId.value = ticketId
                         observeTicket(ticketId)
                         _statusMessage.value = "Searching for ${timeControl.label} ${variant.displayName} opponent..."
-                    } else {
-                        _searchingTicketId.value = null
-                        openOnlineGame(result)
-                        _statusMessage.value = "Match found!"
                     }
                 },
                 onFailure = { err ->
@@ -244,6 +264,7 @@ class OnlineViewModel(
                 .catch { e -> if (e is CancellationException) throw e }
                 .collect { msgs -> _activeGameChat.value = msgs }
         }
+        viewModelScope.launch { repo.updatePresence("in_game", gameId) }
     }
 
     fun closeActiveOnlineGame() {
@@ -252,6 +273,7 @@ class OnlineViewModel(
         _activeGameId.value = null
         _activeGameDoc.value = null
         _activeGameChat.value = emptyList()
+        viewModelScope.launch { repo.updatePresence("online", null) }
     }
 
     fun playOnlineMove(move: Move) {
@@ -259,7 +281,13 @@ class OnlineViewModel(
         if (doc.status != "active") return
         val variant = ChessVariant.entries.firstOrNull { it.name == doc.variant } ?: ChessVariant.STANDARD
         val state = ChessBoardState.fromFen(doc.fen, variant).getOrNull() ?: return
-        val myColor = if (doc.whiteUid == currentUserId) PieceColor.WHITE else if (doc.blackUid == currentUserId) PieceColor.BLACK else return
+        val myColor = if (doc.whiteUid == currentUserId) {
+            PieceColor.WHITE
+        } else if (doc.blackUid == currentUserId) {
+            PieceColor.BLACK
+        } else {
+            return
+        }
         if (state.sideToMove != myColor) return
 
         val legal = MoveGenerator.legalMoves(state)
@@ -267,83 +295,51 @@ class OnlineViewModel(
             it.from == move.from && it.to == move.to && it.promotion == move.promotion && it.dropPieceType == move.dropPieceType
         } ?: return
 
-        val san = MoveGenerator.toSan(state, valid, legal)
-        val next = MoveGenerator.applyMoveUnchecked(state, valid)
-        val (status, winner) = MoveGenerator.evaluateGameResult(next)
-        val moveNumPrefix = if (state.sideToMove == PieceColor.WHITE) "${state.fullMoveNumber}. " else ""
-        val nextPgn = (doc.pgn + " " + moveNumPrefix + san).trim()
-        val newWhiteMs = if (myColor == PieceColor.WHITE) doc.whiteTimeMs + doc.incrementMs else doc.whiteTimeMs
-        val newBlackMs = if (myColor == PieceColor.BLACK) doc.blackTimeMs + doc.incrementMs else doc.blackTimeMs
-
-        val terminalStr = if (status.isTerminal) "finished" else null
-        val resStr = if (!status.isTerminal) null else when (winner) {
-            PieceColor.WHITE -> "1-0"
-            PieceColor.BLACK -> "0-1"
-            null -> "1/2-1/2"
-        }
-        val winUid = when (winner) {
-            PieceColor.WHITE -> doc.whiteUid
-            PieceColor.BLACK -> doc.blackUid
-            null -> ""
-        }
-
         viewModelScope.launch {
             repo.submitOnlineMove(
                 gameId = doc.id,
-                newFen = next.toFen(),
-                newPgn = nextPgn,
-                lastMoveUci = valid.uci,
-                moveCount = doc.moveCount + 1,
-                nextTurn = next.sideToMove.fenChar.toString(),
-                whiteTimeMs = newWhiteMs,
-                blackTimeMs = newBlackMs,
-                terminalStatus = terminalStr,
-                result = resStr,
-                resultReason = if (status.isTerminal) status.description else null,
-                winnerUid = winUid,
-            ).onFailure { _statusMessage.value = "Move failed: ${it.localizedMessage}" }
+                moveUci = valid.uci,
+                expectedMoveCount = doc.moveCount,
+            ).onSuccess { response ->
+                _activeGameDoc.value = response.game
+                if (response.ratingDelta != null) {
+                    _lastRatingDelta.value = response.ratingDelta
+                    repo.fetchRatingHistory(currentUserId).onSuccess { _ratingHistory.value = it }
+                }
+            }.onFailure {
+                _statusMessage.value = "Move rejected: ${it.localizedMessage}"
+            }
         }
     }
 
     fun resignOnlineGame() {
         val doc = _activeGameDoc.value ?: return
         if (doc.status != "active") return
-        val amWhite = doc.whiteUid == currentUserId
-        val oppUid = if (amWhite) doc.blackUid else doc.whiteUid
-        val winnerUid = oppUid
-        val res = if (amWhite) "0-1" else "1-0"
-        val tcCategory = TimeControl(doc.timeControl, (doc.initialTimeMs / 1000).toInt(), (doc.incrementMs / 1000).toInt()).category
         viewModelScope.launch {
-            val oppRating = repo.fetchOpponentRating(oppUid, tcCategory)
-            repo.finishOnlineGame(
-                gameId = doc.id,
-                status = "finished",
-                result = res,
-                reason = "Resignation",
-                winnerUid = winnerUid,
-                ratedGame = doc.ratedGame,
-                timeCategory = tcCategory,
-                opponentRating = oppRating,
-                myScore = 0.0,
-            ).onSuccess { delta ->
-                _lastRatingDelta.value = delta
-            }
+            repo.resignOnlineGame(doc.id)
+                .onSuccess { response ->
+                    _activeGameDoc.value = response.game
+                    _lastRatingDelta.value = response.ratingDelta
+                    repo.fetchRatingHistory(currentUserId).onSuccess { _ratingHistory.value = it }
+                }
+                .onFailure { _statusMessage.value = "Resign error: ${it.localizedMessage}" }
         }
     }
 
     fun offerOnlineDraw() {
         val doc = _activeGameDoc.value ?: return
-        val oppUid = if (doc.whiteUid == currentUserId) doc.blackUid else doc.whiteUid
         viewModelScope.launch {
-            if (doc.drawOfferBy.isNotBlank() && doc.drawOfferBy != currentUserId) {
-                val tcCategory = TimeControl(doc.timeControl, (doc.initialTimeMs / 1000).toInt(), (doc.incrementMs / 1000).toInt()).category
-                val oppRating = repo.fetchOpponentRating(oppUid, tcCategory)
-                repo.finishOnlineGame(doc.id, "finished", "1/2-1/2", "Draw by Agreement", "", doc.ratedGame, tcCategory, oppRating, 0.5)
-                    .onSuccess { delta -> _lastRatingDelta.value = delta }
-            } else {
-                repo.offerDraw(doc.id)
-                _statusMessage.value = "Draw offer sent"
-            }
+            repo.offerOrAcceptDraw(doc.id)
+                .onSuccess { response ->
+                    _activeGameDoc.value = response.game
+                    if (response.ratingDelta != null) {
+                        _lastRatingDelta.value = response.ratingDelta
+                        repo.fetchRatingHistory(currentUserId).onSuccess { _ratingHistory.value = it }
+                    } else if (response.game.drawOfferBy == currentUserId) {
+                        _statusMessage.value = "Draw offer sent"
+                    }
+                }
+                .onFailure { _statusMessage.value = "Draw request failed: ${it.localizedMessage}" }
         }
     }
 
@@ -361,9 +357,8 @@ class OnlineViewModel(
 
     fun sendGameChat(text: String) {
         val doc = _activeGameDoc.value ?: return
-        val myName = ((myProfile.value as? UiState.Success)?.data?.username) ?: "Player"
         viewModelScope.launch {
-            repo.sendGameChat(doc.id, myName, text, doc.participantUids)
+            repo.sendGameChat(doc.id, text)
                 .onFailure { _statusMessage.value = it.localizedMessage }
         }
     }
@@ -371,34 +366,30 @@ class OnlineViewModel(
     fun updateProfile(username: String, bio: String, countryIso: String, fideFed: String, publicVisible: Boolean) {
         viewModelScope.launch {
             repo.updateProfileIdentity(username, bio, countryIso, fideFed, publicVisible)
-                .onSuccess { _statusMessage.value = "Profile updated" }
+                .onSuccess { _statusMessage.value = "Profile synced with server" }
                 .onFailure { _statusMessage.value = it.localizedMessage }
         }
     }
 
     fun challengeFriend(friendUid: String, friendName: String, timeControl: TimeControl, variant: ChessVariant) {
-        val myName = ((myProfile.value as? UiState.Success)?.data?.username) ?: "Player"
         viewModelScope.launch {
             repo.createFriendChallengeGame(
                 friendUid = friendUid,
-                friendName = friendName,
-                myName = myName,
                 variant = variant,
                 timeControl = timeControl.label,
                 initialTimeMs = timeControl.initialSeconds * 1000L,
                 incrementMs = timeControl.incrementSeconds * 1000L,
                 ratedGame = true,
-            ).onSuccess { gameId ->
-                openOnlineGame(gameId)
+            ).onSuccess { game ->
+                openOnlineGame(game.id)
                 _statusMessage.value = "Challenge game started vs $friendName"
             }.onFailure { _statusMessage.value = it.localizedMessage }
         }
     }
 
     fun addFriend(recipientUid: String, recipientName: String) {
-        val myName = ((myProfile.value as? UiState.Success)?.data?.username) ?: "Player"
         viewModelScope.launch {
-            repo.sendFriendRequest(recipientUid, recipientName, myName)
+            repo.sendFriendRequest(recipientUid)
                 .onSuccess { _statusMessage.value = "Friend request sent to $recipientName" }
                 .onFailure { _statusMessage.value = it.localizedMessage }
         }
@@ -426,18 +417,16 @@ class OnlineViewModel(
     }
 
     fun sendDirectMessage(recipientUid: String, text: String) {
-        val myName = ((myProfile.value as? UiState.Success)?.data?.username) ?: "Player"
         viewModelScope.launch {
-            repo.sendDirectMessage(recipientUid, myName, text)
+            repo.sendDirectMessage(recipientUid, text)
                 .onFailure { _statusMessage.value = it.localizedMessage }
         }
     }
 
     fun publishStudy(title: String, description: String, pgn: String) {
-        val myName = ((myProfile.value as? UiState.Success)?.data?.username) ?: "Player"
         viewModelScope.launch {
-            repo.publishCloudStudy(myName, title, description, pgn, listOf("ChessHub"), true, 1)
-                .onSuccess { _statusMessage.value = "Study published to ChessHub Cloud" }
+            repo.publishCloudStudy(title, description, pgn, listOf("ChessHub"), true, 1)
+                .onSuccess { _statusMessage.value = "Study published to ChessHub server" }
                 .onFailure { _statusMessage.value = it.localizedMessage }
         }
     }
@@ -467,7 +456,6 @@ class OnlineViewModel(
     }
 
     fun createTournament(name: String, format: String, variant: ChessVariant, timeControl: TimeControl) {
-        val prof = (myProfile.value as? UiState.Success)?.data
         viewModelScope.launch {
             repo.createTournament(
                 name = name,
@@ -476,17 +464,14 @@ class OnlineViewModel(
                 timeControl = timeControl.label,
                 ratedGame = true,
                 maxRounds = if (format == "swiss") 5 else 10,
-                creatorName = prof?.username ?: "Host",
-                creatorRating = (prof?.blitzRating ?: 1500L).toInt(),
             ).onSuccess { _statusMessage.value = "Tournament launched" }
                 .onFailure { _statusMessage.value = it.localizedMessage }
         }
     }
 
     fun joinTournament(t: TournamentDoc) {
-        val prof = (myProfile.value as? UiState.Success)?.data
         viewModelScope.launch {
-            repo.joinTournament(t, prof?.username ?: "Player", (prof?.blitzRating ?: 1500L).toInt())
+            repo.joinTournament(t)
                 .onSuccess { _statusMessage.value = "Joined ${t.name}" }
                 .onFailure { _statusMessage.value = it.localizedMessage }
         }
@@ -548,12 +533,13 @@ class OnlineViewModel(
     private fun <T> Flow<T>.toUiState(label: String): Flow<UiState<T>> =
         this.map<T, UiState<T>> { UiState.Success(it) }
             .catch { error ->
-                val firestoreError = generateSequence(error) { it.cause }
-                    .filterIsInstance<FirebaseFirestoreException>()
-                    .firstOrNull()
-                if (firestoreError == null && error is CancellationException) throw error
-                val rootError = firestoreError ?: error
-                Log.w("OnlineVM", "Error observing $label", rootError)
-                emit(UiState.Error(rootError.message ?: "Failed to load $label"))
+                if (error is CancellationException) throw error
+                Log.w("OnlineVM", "Error observing $label", error)
+                emit(UiState.Error(error.message ?: "Failed to load $label"))
             }
+
+    override fun onCleared() {
+        super.onCleared()
+        repo.disconnectRealtime()
+    }
 }

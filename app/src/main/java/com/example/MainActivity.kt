@@ -47,7 +47,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
-import androidx.credentials.CredentialManager
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -56,18 +55,21 @@ import com.example.audio.MusicPlayContext
 import com.example.audio.MusicPlayerManager
 import com.example.audio.SoundAndHapticsManager
 import com.example.audio.VoiceCoachManager
-import com.example.auth.GoogleAuthHelper
+import com.example.auth.AuthSession
+import com.example.auth.AuthState
+import com.example.auth.HttpAuthRepository
 import com.example.chess.ChessVariant
 import com.example.data.local.AppSettings
 import com.example.data.local.ChessHubDatabase
 import com.example.data.local.CollectionEntity
 import com.example.data.local.LocalChessRepository
 import com.example.data.local.SettingsRepository
-import com.example.data.remote.ChessHubOnlineRepository
 import com.example.data.remote.ExternalBroadcastItem
 import com.example.data.remote.ExternalChessApis
 import com.example.data.remote.ExternalPlayerSummary
 import com.example.data.remote.ExternalTvChannel
+import com.example.data.remote.RemoteChessHubOnlineRepository
+import com.example.data.remote.WebSocketConnectionState
 import com.example.ui.screens.AnalyzeScreen
 import com.example.ui.screens.AuthScreen
 import com.example.ui.screens.ChessNewsScreen
@@ -85,14 +87,7 @@ import com.example.viewmodel.PlayMode
 import com.example.viewmodel.PuzzleMode
 import com.example.viewmodel.TrainingViewModel
 import com.example.viewmodel.UiState
-import com.google.firebase.Firebase
-import com.google.firebase.auth.FirebaseAuth
-import com.google.firebase.auth.FirebaseUser
-import com.google.firebase.auth.auth
-import kotlinx.coroutines.channels.awaitClose
-import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.launch
 import java.util.Locale
 import java.util.UUID
@@ -101,7 +96,7 @@ sealed interface AppAuthMode {
     data object Pending : AppAuthMode
     data object Unauthenticated : AppAuthMode
     data object OfflineGuest : AppAuthMode
-    data class Authenticated(val user: FirebaseUser) : AppAuthMode
+    data class Authenticated(val session: AuthSession) : AppAuthMode
 }
 
 class MainActivity : ComponentActivity() {
@@ -138,12 +133,6 @@ class MainActivity : ComponentActivity() {
         }
         return null
     }
-}
-
-private fun FirebaseAuth.authUserFlow(): Flow<FirebaseUser?> = callbackFlow {
-    val listener = FirebaseAuth.AuthStateListener { auth -> trySend(auth.currentUser) }
-    addAuthStateListener(listener)
-    awaitClose { removeAuthStateListener(listener) }
 }
 
 @Composable
@@ -189,48 +178,19 @@ fun ChessHubRoot(
         true
     }
 
-    val firebaseReady = remember(appContext) {
-        if (com.google.firebase.FirebaseApp.getApps(appContext).isNotEmpty()) true
-        else runCatching { com.google.firebase.FirebaseApp.initializeApp(appContext) != null }.getOrDefault(false)
-    }
+    val authRepo = remember(appContext) { HttpAuthRepository(appContext) }
+    val authState by authRepo.authState.collectAsStateWithLifecycle()
+    val defaultServerUrl by authRepo.serverBaseUrl.collectAsStateWithLifecycle()
 
-    val credentialManager = remember(baseContext) { CredentialManager.create(baseContext) }
-    val currentUser by remember(firebaseReady) {
-        if (firebaseReady) Firebase.auth.authUserFlow() else kotlinx.coroutines.flow.flowOf(null)
-    }.collectAsStateWithLifecycle(initialValue = if (firebaseReady) Firebase.auth.currentUser else null)
-
-    var autoSignInDone by remember { mutableStateOf(!firebaseReady) }
     var forceOffline by remember { mutableStateOf(false) }
     var isSigningIn by remember { mutableStateOf(false) }
     var authError by remember { mutableStateOf<String?>(null) }
     val rootScope = rememberCoroutineScope()
 
-    LaunchedEffect(firebaseReady) {
-        if (!firebaseReady) {
-            autoSignInDone = true
-            return@LaunchedEffect
-        }
-        if (Firebase.auth.currentUser != null) {
-            autoSignInDone = true
-        } else {
-            GoogleAuthHelper.attemptAutoSignIn(
-                context = baseContext,
-                credentialManager = credentialManager,
-                onAuthSuccess = {
-                    autoSignInDone = true
-                    forceOffline = false
-                },
-                onUnauthenticated = { autoSignInDone = true },
-                scope = rootScope,
-            )
-        }
-    }
-
-    val authMode = when {
-        currentUser != null -> AppAuthMode.Authenticated(currentUser!!)
-        forceOffline -> AppAuthMode.OfflineGuest
-        !autoSignInDone -> AppAuthMode.Pending
-        else -> AppAuthMode.Unauthenticated
+    val authMode = when (val state = authState) {
+        AuthState.Loading -> if (forceOffline) AppAuthMode.OfflineGuest else AppAuthMode.Pending
+        AuthState.Unauthenticated -> if (forceOffline) AppAuthMode.OfflineGuest else AppAuthMode.Unauthenticated
+        is AuthState.Authenticated -> if (forceOffline) AppAuthMode.OfflineGuest else AppAuthMode.Authenticated(state.session)
     }
 
     CompositionLocalProvider(androidx.compose.ui.platform.LocalConfiguration provides localizedConfig) {
@@ -249,24 +209,42 @@ fun ChessHubRoot(
                 AppAuthMode.Unauthenticated -> {
                     AuthScreen(
                         isSigningIn = isSigningIn,
+                        defaultServerUrl = defaultServerUrl,
                         errorMessage = authError,
-                        onGoogleSignInClick = {
+                        onSignInClick = { serverUrl, identifier, password ->
                             isSigningIn = true
                             authError = null
-                            GoogleAuthHelper.onGoogleSignInClicked(
-                                context = baseContext,
-                                credentialManager = credentialManager,
-                                onAuthSuccess = {
+                            rootScope.launch {
+                                authRepo.signInWithCredentials(serverUrl, identifier, password)
+                                    .onSuccess {
+                                        isSigningIn = false
+                                        forceOffline = false
+                                    }
+                                    .onFailure { err ->
+                                        isSigningIn = false
+                                        authError = err.localizedMessage ?: "Sign in failed"
+                                    }
+                            }
+                        },
+                        onRegisterClick = { serverUrl, username, email, password ->
+                            isSigningIn = true
+                            authError = null
+                            rootScope.launch {
+                                authRepo.registerAccount(
+                                    serverUrl = serverUrl,
+                                    username = username,
+                                    email = email,
+                                    password = password,
+                                    countryIso = settings.countryIso,
+                                    fideFederation = settings.fideFederation,
+                                ).onSuccess {
                                     isSigningIn = false
                                     forceOffline = false
-                                },
-                                onAuthError = { msg ->
+                                }.onFailure { err ->
                                     isSigningIn = false
-                                    authError = msg
-                                },
-                                scope = rootScope,
-                                onAuthCancelled = { isSigningIn = false },
-                            )
+                                    authError = err.localizedMessage ?: "Registration failed"
+                                }
+                            }
                         },
                         onContinueOfflineClick = { forceOffline = true },
                     )
@@ -274,7 +252,7 @@ fun ChessHubRoot(
                 AppAuthMode.OfflineGuest -> {
                     ChessHubMainShell(
                         isOnline = false,
-                        onlineUser = null,
+                        onlineSession = null,
                         settings = settings,
                         settingsRepo = settingsRepo,
                         localRepo = localRepo,
@@ -289,10 +267,10 @@ fun ChessHubRoot(
                     )
                 }
                 is AppAuthMode.Authenticated -> {
-                    key(authMode.user.uid) {
+                    key(authMode.session.user.uid) {
                         ChessHubMainShell(
                             isOnline = true,
-                            onlineUser = authMode.user,
+                            onlineSession = authMode.session,
                             settings = settings,
                             settingsRepo = settingsRepo,
                             localRepo = localRepo,
@@ -302,9 +280,10 @@ fun ChessHubRoot(
                             externalApis = externalApis,
                             incomingPayload = incomingPayload,
                             onConsumeIncomingPayload = onConsumeIncomingPayload,
-                            onSwitchToOnlineSignIn = {},
+                            onSwitchToOnlineSignIn = { forceOffline = false },
                             onSignOut = {
-                                GoogleAuthHelper.signOut(credentialManager, rootScope) {
+                                rootScope.launch {
+                                    authRepo.signOut()
                                     forceOffline = false
                                 }
                             },
@@ -319,7 +298,7 @@ fun ChessHubRoot(
 @Composable
 private fun ChessHubMainShell(
     isOnline: Boolean,
-    onlineUser: FirebaseUser?,
+    onlineSession: AuthSession?,
     settings: AppSettings,
     settingsRepo: SettingsRepository,
     localRepo: LocalChessRepository,
@@ -346,16 +325,21 @@ private fun ChessHubMainShell(
         factory = simpleVmFactory { TrainingViewModel(localRepo, settingsRepo, externalApis, voiceCoach) },
     )
 
-    // Strictly instantiate OnlineViewModel ONLY when authenticated
-    val onlineVm: OnlineViewModel? = if (isOnline && onlineUser != null) {
+    // Modular REST + WebSocket repository & OnlineViewModel instantiated only when signed in
+    val onlineVm: OnlineViewModel? = if (isOnline && onlineSession != null) {
         viewModel(
-            key = "online_${onlineUser.uid}",
+            key = "online_${onlineSession.user.uid}_${onlineSession.serverUrl}",
             factory = simpleVmFactory {
+                val repo = RemoteChessHubOnlineRepository(
+                    serverUrl = onlineSession.serverUrl,
+                    accessTokenProvider = { onlineSession.accessToken },
+                    currentUserId = onlineSession.user.uid,
+                )
                 OnlineViewModel(
-                    repo = ChessHubOnlineRepository(context.applicationContext),
+                    repo = repo,
                     externalApis = externalApis,
-                    currentUserId = onlineUser.uid,
-                    initialDisplayName = onlineUser.displayName ?: "Player",
+                    currentUserId = onlineSession.user.uid,
+                    initialDisplayName = onlineSession.user.username.ifBlank { settings.localDisplayName },
                     countryIso = settings.countryIso,
                     fideFederation = settings.fideFederation,
                 )
@@ -415,12 +399,13 @@ private fun ChessHubMainShell(
     val studies by localRepo.observeStudies().collectAsStateWithLifecycle(initialValue = emptyList())
     val collections by localRepo.observeCollections().collectAsStateWithLifecycle(initialValue = emptyList())
 
-    // Offline public external watch fallback state (zero Firestore)
+    // Offline public external watch fallback state (zero backend calls)
     var offlineBroadcasts by remember { mutableStateOf<List<ExternalBroadcastItem>>(emptyList()) }
     var offlineTv by remember { mutableStateOf<List<ExternalTvChannel>>(emptyList()) }
     var offlineExtPlayer by remember { mutableStateOf<ExternalPlayerSummary?>(null) }
 
     // Online state subscriptions (when onlineVm != null)
+    val onlineConnectionState by (onlineVm?.connectionState ?: MutableStateFlow(WebSocketConnectionState.DISCONNECTED)).collectAsStateWithLifecycle()
     val onlineStatusMsg by (onlineVm?.statusMessage ?: MutableStateFlow(null)).collectAsStateWithLifecycle()
     val onlineIsAdmin by (onlineVm?.isAdmin ?: MutableStateFlow(false)).collectAsStateWithLifecycle()
     val myProfileState by (onlineVm?.myProfile ?: MutableStateFlow(UiState.Loading)).collectAsStateWithLifecycle()
@@ -653,12 +638,14 @@ private fun ChessHubMainShell(
                             localState = localGameState,
                             settings = settings,
                             isOnline = isOnline,
-                            currentUserId = onlineUser?.uid,
+                            currentUserId = onlineSession?.user?.uid,
                             myProfile = myProfile,
                             searchingTicketId = searchingTicketId,
                             activeOnlineGame = activeOnlineGame,
                             onlineChatMessages = onlineChat,
                             onlineRatingDelta = onlineRatingDelta,
+                            onlineConnectionState = onlineConnectionState,
+                            onReconnectOnline = { onlineVm?.reconnectActiveGame() },
                             onLocalMove = { localGameVm.onUserMove(it) },
                             onQueuePremove = { localGameVm.queuePremove(it) },
                             onClearPremoves = { localGameVm.clearPremoves() },
@@ -794,7 +781,7 @@ private fun ChessHubMainShell(
                         )
                         else -> CommunityHubScreen(
                             isOnline = isOnline,
-                            currentUserId = onlineUser?.uid,
+                            currentUserId = onlineSession?.user?.uid,
                             isAdmin = onlineIsAdmin,
                             settings = settings,
                             myProfile = myProfile,

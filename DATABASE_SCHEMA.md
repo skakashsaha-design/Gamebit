@@ -1,6 +1,6 @@
 # ChessHub Database Schema & Persistence Architecture
 
-ChessHub separates local device persistence (**Room v2 + Jetpack DataStore**) from authenticated online cloud persistence (**Firebase Cloud Firestore**). Offline Mode never instantiates Firestore or runs background cloud listeners.
+ChessHub separates local device persistence (**Room v2 + Jetpack DataStore**) from authenticated online server persistence (**Modular REST/HTTPS + WebSocket Backend**). Offline Mode never opens backend WebSockets or runs cloud listeners.
 
 ---
 
@@ -54,11 +54,13 @@ Persists 40+ typed preference keys (`AppSettings`) without SQLite overhead:
 
 ---
 
-## 3. Cloud Firestore Schema (Authenticated Online Mode)
-Named database: `ai-studio-android-chesshub-7c80fd1a-15f9-41cb-85ee-b807153588f0` (schema defined in `firebase-blueprint.json`, enforced by `firestore.rules`):
-- `/users/{userId}` (`UserPrivate`): Owner-only private profile & privacy toggles.
-- `/publicProfiles/{userId}` (`PublicProfile`): Searchable public ratings (`bulletRating`, `blitzRating`, `rapidRating`, `classicalRating`, `puzzleRating`), W/D/L counters, `countryIso`, `fideFederation`, `onlineStatus`.
-- `/matchmaking/{ticketId}` (`MatchTicket`): Variant/time-control/rated matchmaking tickets with expanding `minRating`–`maxRating` bands.
-- `/games/{gameId}` (`OnlineGame`) + `/games/{gameId}/chat/{messageId}` (`GameChatMessage`): Live game board FEN/PGN, clocks, draw/takeback offers, participant-scoped chat.
-- `/friends/{friendshipId}` (`Friendship`), `/messages/{threadId}` + `/items/{msgId}` (`DirectMessage`): Friends and 1:1 threads.
-- `/studies/{studyId}` (`CloudStudy`), `/clubs/{clubId}` + `/messages/{msgId}`, `/teams/{teamId}`, `/tournaments/{tournamentId}` + `/entries/{entryId}`, `/reports/{reportId}` (`AbuseReport`).
+## 3. Auth Session DataStore & Online Backend Contract (Authenticated Online Mode)
+### 3.1 Auth Session Store (`chesshub_auth_session` via `HttpAuthRepository`)
+Stores only the authenticated bearer token, configurable server base URL, `userId`, `username`, and `email` (never stores raw passwords).
+
+### 3.2 REST/HTTPS + WebSocket Server-Authoritative Models (`ChessHubBackendModels.kt`)
+All online entities are transported via Retrofit REST (`/v1/...`) and real-time OkHttp WebSockets (`wss://.../v1/ws`):
+- **Accounts & Profiles**: Private user account metadata + searchable `PublicProfileDto` (`bulletRating`, `blitzRating`, `rapidRating`, `classicalRating`, `puzzleRating`, W/D/L counters, `countryIso`, `fideFederation`, `onlineStatus`, `lastSeenAtMs`) and `RatingHistoryPointDto` snapshots.
+- **Matchmaking (`MatchTicketDto`)**: Variant, time control, and rated queue tickets with expanding rating bands and WebSocket match notifications.
+- **Server-Authoritative Games (`OnlineGameDto`, `GameChatMessageDto`)**: Server-validated move transitions (`fen`, `pgn`, `movesUci`), authoritative white/black clocks (`whiteRemainingMs`, `blackRemainingMs`, `serverTimestampMs`), connection/presence indicators (`whiteConnected`, `blackConnected`), draw/takeback offers, server-calculated rating deltas, reconnection support, and participant chat.
+- **Social & Organizations**: `FriendshipDto`, `DirectMessageDto`, `CloudStudyDto`, `ClubDto`, `TeamDto`, `TournamentDto`, and `AbuseReportRequest`.

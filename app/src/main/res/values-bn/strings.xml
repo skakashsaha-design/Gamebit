@@ -7,7 +7,7 @@
     <string name="nav_community">কমিউনিটি</string>
     <string name="status_offline">অফলাইন মোড</string>
     <string name="status_online">অনলাইন</string>
-    <string name="sign_in_google">গুগল দিয়ে সাইন ইন</string>
+    <string name="sign_in_online">অনলাইন সাইন ইন</string>
     <string name="continue_offline">অফলাইনে চালিয়ে যান</string>
     <string name="sign_out">সাইন আউট</string>
     <string name="home_subtitle">খেলুন, বিশ্লেষণ করুন, শিখুন এবং প্রতিযোগিতা করুন</string>

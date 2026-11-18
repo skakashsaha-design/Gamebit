@@ -292,7 +292,7 @@ fun ProfileAndLookupTab(
                                 modifier = Modifier.weight(1f),
                             ) { Text("Save Local Profile") }
                             Button(onClick = onRequestSignIn, modifier = Modifier.weight(1f)) {
-                                Text("Google Sign-In")
+                                Text("Online Sign-In")
                             }
                         }
                     }
@@ -419,36 +419,32 @@ fun ProfileAndLookupTab(
             }
         }
 
-        // Badges & Titles
+        // Badges & Achievements (computed strictly from real user activity)
         item {
-            val badges = listOf(
-                Triple("Club Player", "Active ChessHub profile & local archive", true),
-                Triple("Tactician", "Reach a Puzzle Streak of 5+ (Best: ${settings.puzzleBestStreak})", settings.puzzleBestStreak >= 5),
-                Triple("Speed Solver", "Score 10+ in Puzzle Storm/Racer (Best: ${settings.puzzleBestStorm})", settings.puzzleBestStorm >= 10),
-                Triple("Tactical Master", "Reach 1450+ Puzzle Rating (Current: ${settings.localPuzzleRating})", settings.localPuzzleRating >= 1450),
-                Triple("Contender", "Complete an online rated ChessHub match", (myProfile?.gamesPlayed ?: 0L) >= 1L),
-            )
+            val badges = remember(savedGames, myProfile, settings) {
+                computeChessHubAchievements(savedGames, myProfile, settings)
+            }
             Card(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth().testTag("profile_achievements_card"),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
             ) {
                 Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Icon(Icons.Default.EmojiEvents, contentDescription = null, tint = MaterialTheme.colorScheme.secondary)
-                        Text("Titles, Badges & Awards", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                        Text("Titles, Badges & Achievements", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
                     }
-                    badges.forEach { (title, desc, unlocked) ->
+                    badges.forEach { badge ->
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Column(modifier = Modifier.weight(1f)) {
-                                Text(title, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
-                                Text(desc, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text(badge.title, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+                                Text(badge.description, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
-                            if (unlocked) {
+                            if (badge.unlocked) {
                                 Icon(Icons.Default.Verified, contentDescription = "Unlocked", tint = MaterialTheme.colorScheme.primary)
                             } else {
                                 Text("Locked", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -852,11 +848,11 @@ fun SettingsAndAboutScreen(
                         Text("Version ${BuildConfig.VERSION_NAME} (Build ${BuildConfig.VERSION_CODE})", style = MaterialTheme.typography.bodySmall)
                         Text("Package: ${BuildConfig.APPLICATION_ID}", style = MaterialTheme.typography.bodySmall)
                         Text(
-                            "ChessHub combines pure-Kotlin offline chess intelligence (ChessHub Kotlin UCI Engine 2.0, 9 variants, 18 bots, Mistake Breakdown, Puzzles & Opening Drills) with Firebase real-time rated online play and read-only Lichess & Chess.com public endpoints.",
+                            "ChessHub combines pure-Kotlin offline chess intelligence (ChessHub Kotlin UCI Engine 2.0, 9 variants, 18 bots, Mistake Breakdown, Puzzles & Opening Drills) with modular REST + WebSocket online play and read-only Lichess & Chess.com public endpoints.",
                             style = MaterialTheme.typography.bodySmall,
                         )
                         Text(
-                            "Privacy & Permissions: Zero broad storage permissions. Device music uses Android Storage Access Framework (ACTION_OPEN_DOCUMENT). Games, puzzles, and preferences stay private locally unless signed in.",
+                            "Privacy & Permissions: Zero broad storage permissions. Device music uses Android Storage Access Framework (ACTION_OPEN_DOCUMENT). Games, puzzles, and preferences stay private locally unless signed in to a ChessHub server.",
                             style = MaterialTheme.typography.bodySmall,
                         )
                         Text(stringResource(R.string.independent_notice), style = MaterialTheme.typography.bodySmall)
@@ -876,9 +872,8 @@ fun SettingsAndAboutScreen(
             title = { Text("Open Source Licenses") },
             text = {
                 Text(
-                    "• AndroidX, Jetpack Compose, Room, DataStore, Navigation, Credentials: Apache License 2.0\n" +
-                        "• Firebase Android SDKs: Apache License 2.0\n" +
-                        "• OkHttp & Moshi: Apache License 2.0\n" +
+                    "• AndroidX, Jetpack Compose, Room, DataStore, Navigation: Apache License 2.0\n" +
+                        "• Retrofit, OkHttp (HTTPS + WebSocket) & Moshi: Apache License 2.0\n" +
                         "• Fonts (Space Grotesk, Plus Jakarta Sans, JetBrains Mono): SIL Open Font License 1.1\n" +
                         "• ChessHub Kotlin UCI Engine 2.0: Original pure-Kotlin Alpha-Beta / Quiescence / Multi-PV implementation.\n" +
                         "• External APIs: Official read-only Lichess & Chess.com public endpoints & Lichess Atom News feed.",
@@ -888,6 +883,105 @@ fun SettingsAndAboutScreen(
             confirmButton = { TextButton(onClick = { showLicensesDialog = false }) { Text("Close") } },
         )
     }
+}
+
+data class ChessHubAchievement(
+    val id: String,
+    val title: String,
+    val description: String,
+    val unlocked: Boolean,
+)
+
+fun computeChessHubAchievements(
+    savedGames: List<LocalGameEntity>,
+    myProfile: PublicProfileDoc?,
+    settings: AppSettings,
+): List<ChessHubAchievement> {
+    val localGamesCount = savedGames.size
+    val onlineGamesCount = (myProfile?.gamesPlayed ?: 0L).toInt()
+    val totalGames = localGamesCount + onlineGamesCount
+
+    val localWins = savedGames.count {
+        (it.whiteName == "You" && it.result == "1-0") || (it.blackName == "You" && it.result == "0-1")
+    }
+    val onlineWins = (myProfile?.wins ?: 0L).toInt()
+    val totalWins = localWins + onlineWins
+
+    val checkmateWins = savedGames.count {
+        ((it.whiteName == "You" && it.result == "1-0") || (it.blackName == "You" && it.result == "0-1")) &&
+            it.resultReason.contains("checkmate", ignoreCase = true)
+    }
+
+    var currentWinStreak = 0
+    var bestGameWinStreak = 0
+    savedGames.sortedBy { it.createdAt }.forEach { game ->
+        val isPlayerWin = (game.whiteName == "You" && game.result == "1-0") ||
+            (game.blackName == "You" && game.result == "0-1")
+        if (isPlayerWin) {
+            currentWinStreak++
+            if (currentWinStreak > bestGameWinStreak) bestGameWinStreak = currentWinStreak
+        } else {
+            currentWinStreak = 0
+        }
+    }
+
+    val bestOnlineRating = listOfNotNull(
+        myProfile?.bulletRating,
+        myProfile?.blitzRating,
+        myProfile?.rapidRating,
+        myProfile?.classicalRating,
+    ).maxOrNull()?.toInt() ?: 1500
+
+    return listOf(
+        ChessHubAchievement(
+            id = "first_win",
+            title = "First Win",
+            description = "Win your first local or online game ($totalWins won)",
+            unlocked = totalWins >= 1,
+        ),
+        ChessHubAchievement(
+            id = "first_checkmate",
+            title = "First Checkmate",
+            description = "Deliver checkmate to win a game ($checkmateWins checkmates)",
+            unlocked = checkmateWins >= 1,
+        ),
+        ChessHubAchievement(
+            id = "ten_wins",
+            title = "10 Wins",
+            description = "Win 10 games across bots or online ($totalWins / 10)",
+            unlocked = totalWins >= 10,
+        ),
+        ChessHubAchievement(
+            id = "fifty_games",
+            title = "50 Games",
+            description = "Complete 50 rated or local games ($totalGames / 50)",
+            unlocked = totalGames >= 50,
+        ),
+        ChessHubAchievement(
+            id = "hundred_games",
+            title = "100 Games",
+            description = "Complete 100 games in ChessHub ($totalGames / 100)",
+            unlocked = totalGames >= 100,
+        ),
+        ChessHubAchievement(
+            id = "win_streak",
+            title = "Win Streak",
+            description = "Win 3 games in a row or reach Puzzle Streak 5 (Game Streak: $bestGameWinStreak)",
+            unlocked = bestGameWinStreak >= 3 || settings.puzzleBestStreak >= 5,
+        ),
+        ChessHubAchievement(
+            id = "rating_milestone",
+            title = "Rating Milestone",
+            description = "Reach 1600+ Online ELO or 1450+ Puzzle Rating (Puzzle: ${settings.localPuzzleRating})",
+            unlocked = bestOnlineRating >= 1600 || settings.localPuzzleRating >= 1450,
+        ),
+        ChessHubAchievement(
+            id = "speed_solver",
+            title = "Speed Solver",
+            description = "Score 10+ in Puzzle Storm/Racer (Best: ${settings.puzzleBestStorm})",
+            unlocked = settings.puzzleBestStorm >= 10,
+        ),
+    )
 }
 
 @Composable

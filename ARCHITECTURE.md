@@ -13,11 +13,11 @@
    - `local/`: Room database (`ChessHubDatabase.kt`) for local games, studies, collections, puzzle attempts, custom mistake puzzles, and lesson progress; DataStore `SettingsRepository` with automatic low-RAM detection; offline `PuzzlesAndLessonsCatalog`.
    - `remote/`:
      - `ExternalChessApis.kt`: Read-only OkHttp client for official public Lichess & Chess.com APIs.
-     - `FirestoreModels.kt`, `FirestoreErrorHandler.kt`, `FirestoreRepositories.kt`: Cloud Firestore repositories targeting named DB `ai-studio-android-chesshub-7c80fd1a-15f9-41cb-85ee-b807153588f0` with strict zero-trust security rules (`firestore.rules`).
+     - `ChessHubBackendModels.kt`, `ChessHubBackendApi.kt`, `ChessHubWebSocketClient.kt`, `ChessHubOnlineRepositories.kt`: Modular Retrofit REST/HTTPS + OkHttp WebSocket backend client supporting server-authoritative game state, server-validated moves, clocks, ratings, matchmaking, reconnection, presence heartbeats, chat, friends, DMs, clubs, teams, tournaments, and cloud studies.
 
 3. **Authentication & Lifecycle (`com.example.auth`, `MainActivity.kt`)**
-   - Dual-path startup: Google Sign-In via Jetpack `CredentialManager` (`GetSignInWithGoogleOption` / `GetGoogleIdOption`) OR isolated Offline Mode (`OfflineGuest`).
-   - Strict Auth Gating: `OnlineViewModel` and `ChessHubOnlineRepository` are instantiated exclusively inside `key(user.uid)` when `currentUser != null`. Offline Mode never instantiates Firestore or runs Firestore listeners.
+   - Dual-path startup: Configurable ChessHub Server account sign-in/registration (`HttpAuthRepository` backed by Jetpack DataStore `chesshub_auth_session` for bearer tokens + metadata) OR isolated Offline Mode (`OfflineGuest`).
+   - Strict Auth Gating: `OnlineViewModel` and `RemoteChessHubOnlineRepository` activate exclusively when an authenticated `AuthUser` session is present. Offline Mode runs zero backend network calls or WebSocket connections.
 
 4. **UI & Presentation (`com.example.ui`, `com.example.viewmodel`)**
    - MVVM with `StateFlow` + `collectAsStateWithLifecycle`.

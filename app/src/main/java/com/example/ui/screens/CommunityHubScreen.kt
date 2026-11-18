@@ -275,8 +275,11 @@ private fun SignInRequiredNotice(title: String, onRequestSignIn: () -> Unit) {
     ) {
         Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-            Text("Sign in with Google to use ChessHub Online community features.", style = MaterialTheme.typography.bodySmall)
-            Button(onClick = onRequestSignIn) { Text("Sign in with Google") }
+            Text(
+                "Sign in to your ChessHub Online server account to access multiplayer tournaments, clubs, leaderboards, and messaging.",
+                style = MaterialTheme.typography.bodySmall,
+            )
+            Button(onClick = onRequestSignIn) { Text("Connect Online Account") }
         }
     }
 }

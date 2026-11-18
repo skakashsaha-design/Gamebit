@@ -5,10 +5,9 @@ ChessHub is an independent Android chess application. Every library, font, and e
 ## Android & Kotlin Libraries
 | Component | License | Usage |
 |---|---|---|
-| AndroidX Core, Lifecycle, Activity Compose, Jetpack Compose, Material 3, Navigation Compose, Room, DataStore, Credentials | Apache License 2.0 | UI, persistence, navigation, Google Sign-In credential retrieval |
+| AndroidX Core, Lifecycle, Activity Compose, Jetpack Compose, Material 3, Navigation Compose, Room, DataStore | Apache License 2.0 | UI, local SQLite & preference persistence, navigation |
 | Kotlin Standard Library & Kotlinx Coroutines | Apache License 2.0 | Language runtime and asynchronous engine/network flows |
-| Firebase Android SDKs (Auth, Firestore) | Apache License 2.0 | Cloud authentication and real-time database |
-| OkHttp, Retrofit, Moshi | Apache License 2.0 | Read-only official public HTTP API access |
+| OkHttp, Retrofit, Moshi | Apache License 2.0 | ChessHub REST/HTTPS & WebSocket client plus read-only public Lichess / Chess.com HTTP API access |
 | Robolectric, JUnit 4 | MIT / Eclipse Public License 1.0 | Automated unit and UI verification tests |
 
 ## Bundled Fonts (`/app/src/main/res/font/`)

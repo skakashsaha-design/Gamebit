@@ -111,6 +111,7 @@ import com.example.data.remote.GameChatMessageDoc
 import com.example.data.remote.OnlineGameDoc
 import com.example.data.remote.PublicProfileDoc
 import com.example.data.remote.RatingDeltaResult
+import com.example.data.remote.WebSocketConnectionState
 import com.example.ui.components.ChessBoardView
 import com.example.ui.components.PieceMiniIcon
 import com.example.ui.theme.ChessBoardThemes
@@ -130,6 +131,8 @@ fun PlayScreen(
     activeOnlineGame: OnlineGameDoc?,
     onlineChatMessages: List<GameChatMessageDoc>,
     onlineRatingDelta: RatingDeltaResult?,
+    onlineConnectionState: WebSocketConnectionState = WebSocketConnectionState.DISCONNECTED,
+    onReconnectOnline: () -> Unit = {},
     onLocalMove: (Move) -> Unit,
     onQueuePremove: (Move) -> Unit,
     onClearPremoves: () -> Unit,
@@ -248,6 +251,8 @@ fun PlayScreen(
                 activeGame = activeOnlineGame,
                 chatMessages = onlineChatMessages,
                 ratingDelta = onlineRatingDelta,
+                connectionState = onlineConnectionState,
+                onReconnectOnline = onReconnectOnline,
                 onStartMatchmaking = onStartMatchmaking,
                 onCancelMatchmaking = onCancelMatchmaking,
                 onOnlineMove = onOnlineMove,
@@ -1452,6 +1457,8 @@ private fun OnlinePlayContent(
     activeGame: OnlineGameDoc?,
     chatMessages: List<GameChatMessageDoc>,
     ratingDelta: RatingDeltaResult?,
+    connectionState: WebSocketConnectionState,
+    onReconnectOnline: () -> Unit,
     onStartMatchmaking: (ChessVariant, TimeControl, Boolean) -> Unit,
     onCancelMatchmaking: () -> Unit,
     onOnlineMove: (Move) -> Unit,
@@ -1466,13 +1473,13 @@ private fun OnlinePlayContent(
         Box(modifier = Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
             Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Icon(Icons.Default.Public, contentDescription = null, modifier = Modifier.size(48.dp), tint = MaterialTheme.colorScheme.primary)
-                Text("Sign in for Real-Time Online Chess", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                Text("Connect for Real-Time Online Chess", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                 Text(
-                    "Matchmaking, Glicko-2 ratings, friend challenges, and live game chat sync securely via Cloud Firestore when signed in with Google.",
+                    "Matchmaking, server-authoritative move validation, live clocks, Glicko-2 ratings, and game chat sync via HTTPS & WebSockets.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                Button(onClick = onRequestSignIn) { Text("Sign in with Google") }
+                Button(onClick = onRequestSignIn) { Text("Sign In Online") }
             }
         }
         return
@@ -1488,12 +1495,23 @@ private fun OnlinePlayContent(
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             item {
-                Text("Online Matchmaking Pool", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-                Text(
-                    "Real-time opponent pairing via ChessHub Cloud Firestore.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Online Matchmaking Pool", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                        Text(
+                            "Server-authoritative pairing via REST & WebSocket (${connectionState.name.lowercase()}).",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    if (connectionState != WebSocketConnectionState.CONNECTED) {
+                        TextButton(onClick = onReconnectOnline) { Text("Reconnect") }
+                    }
+                }
             }
             item {
                 Text("Time Control", style = MaterialTheme.typography.labelLarge)
@@ -1593,12 +1611,34 @@ private fun OnlinePlayContent(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text(
-                        "${activeGame.whiteName} vs ${activeGame.blackName} (${activeGame.timeControl})",
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.Bold,
-                    )
-                    TextButton(onClick = onCloseGame) { Text("Leave") }
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            "${activeGame.whiteName} vs ${activeGame.blackName} (${activeGame.timeControl})",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.Bold,
+                        )
+                        Text(
+                            text = when (connectionState) {
+                                WebSocketConnectionState.CONNECTED -> "Live WebSocket • Server clocks synced"
+                                WebSocketConnectionState.RECONNECTING,
+                                WebSocketConnectionState.CONNECTING,
+                                -> "Reconnecting to game server..."
+                                WebSocketConnectionState.DISCONNECTED -> "Disconnected • Tap Reconnect"
+                            },
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (connectionState == WebSocketConnectionState.CONNECTED) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                MaterialTheme.colorScheme.error
+                            },
+                        )
+                    }
+                    Row {
+                        if (connectionState != WebSocketConnectionState.CONNECTED) {
+                            TextButton(onClick = onReconnectOnline) { Text("Reconnect") }
+                        }
+                        TextButton(onClick = onCloseGame) { Text("Leave") }
+                    }
                 }
             }
             item {

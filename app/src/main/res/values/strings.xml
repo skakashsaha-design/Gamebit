@@ -7,7 +7,7 @@
     <string name="nav_community">Hub</string>
     <string name="status_offline">Offline Mode</string>
     <string name="status_online">Online</string>
-    <string name="sign_in_google">Sign in with Google</string>
+    <string name="sign_in_online">Sign In Online</string>
     <string name="continue_offline">Continue Offline</string>
     <string name="sign_out">Sign Out</string>
     <string name="home_subtitle">Play, analyze, train, and compete</string>

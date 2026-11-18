@@ -88,18 +88,40 @@ import com.example.data.remote.TournamentDoc
 import com.example.ui.components.drawChessPiece
 import com.example.viewmodel.PlayMode
 
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.filled.CloudDone
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Tab
+import androidx.compose.material3.TabRow
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
+
 @Composable
 fun AuthScreen(
     isSigningIn: Boolean,
+    defaultServerUrl: String,
     errorMessage: String?,
-    onGoogleSignInClick: () -> Unit,
+    onSignInClick: (serverUrl: String, usernameOrEmail: String, password: String) -> Unit,
+    onRegisterClick: (serverUrl: String, username: String, email: String, password: String) -> Unit,
     onContinueOfflineClick: () -> Unit,
 ) {
+    var authTab by remember { mutableStateOf(0) } // 0 = Sign In, 1 = Create Account
+    var serverUrl by remember(defaultServerUrl) { mutableStateOf(defaultServerUrl) }
+    var usernameOrEmail by remember { mutableStateOf("") }
+    var registerUsername by remember { mutableStateOf("") }
+    var registerEmail by remember { mutableStateOf("") }
+    var password by remember { mutableStateOf("") }
+    var showPassword by remember { mutableStateOf(false) }
+
     Scaffold { innerPadding ->
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
+                .verticalScroll(rememberScrollState())
                 .padding(24.dp),
             contentAlignment = Alignment.Center,
         ) {
@@ -111,7 +133,7 @@ fun AuthScreen(
                 verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
                 Surface(
-                    modifier = Modifier.size(88.dp),
+                    modifier = Modifier.size(84.dp),
                     shape = RoundedCornerShape(24.dp),
                     color = MaterialTheme.colorScheme.primaryContainer,
                     border = BorderStroke(2.dp, MaterialTheme.colorScheme.primary),
@@ -142,14 +164,73 @@ fun AuthScreen(
                         verticalArrangement = Arrangement.spacedBy(10.dp),
                     ) {
                         Text(
-                            text = "Online & Offline Ready",
+                            text = "ChessHub Online & Offline",
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.SemiBold,
                         )
                         Text(
-                            text = "Sign in with Google for rated online matchmaking, cloud studies, clubs, tournaments, and leaderboards — or continue offline for full local play, bots, analysis, puzzles, and lessons.",
-                            style = MaterialTheme.typography.bodyMedium,
+                            text = "Connect to a ChessHub REST + WebSocket server for rated matchmaking, server-validated clocks, leaderboards, and clubs — or continue offline for complete local play, bots, analysis, puzzles, and lessons.",
+                            style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+
+                        TabRow(selectedTabIndex = authTab) {
+                            Tab(selected = authTab == 0, onClick = { authTab = 0 }, text = { Text("Sign In") })
+                            Tab(selected = authTab == 1, onClick = { authTab = 1 }, text = { Text("Create Account") })
+                        }
+
+                        OutlinedTextField(
+                            value = serverUrl,
+                            onValueChange = { serverUrl = it },
+                            label = { Text("ChessHub Server URL (HTTPS)") },
+                            leadingIcon = { Icon(Icons.Default.CloudDone, contentDescription = null) },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth().testTag("auth_server_url_input"),
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+                        )
+
+                        if (authTab == 0) {
+                            OutlinedTextField(
+                                value = usernameOrEmail,
+                                onValueChange = { usernameOrEmail = it },
+                                label = { Text("Username or Email") },
+                                singleLine = true,
+                                modifier = Modifier.fillMaxWidth().testTag("auth_identifier_input"),
+                            )
+                        } else {
+                            OutlinedTextField(
+                                value = registerUsername,
+                                onValueChange = { registerUsername = it },
+                                label = { Text("Username") },
+                                singleLine = true,
+                                modifier = Modifier.fillMaxWidth().testTag("auth_register_username_input"),
+                            )
+                            OutlinedTextField(
+                                value = registerEmail,
+                                onValueChange = { registerEmail = it },
+                                label = { Text("Email Address") },
+                                singleLine = true,
+                                modifier = Modifier.fillMaxWidth().testTag("auth_register_email_input"),
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
+                            )
+                        }
+
+                        OutlinedTextField(
+                            value = password,
+                            onValueChange = { password = it },
+                            label = { Text("Password") },
+                            singleLine = true,
+                            visualTransformation = if (showPassword) VisualTransformation.None else PasswordVisualTransformation(),
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                            trailingIcon = {
+                                IconButton(onClick = { showPassword = !showPassword }) {
+                                    Icon(
+                                        imageVector = if (showPassword) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                                        contentDescription = if (showPassword) "Hide password" else "Show password",
+                                    )
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth().testTag("auth_password_input"),
                         )
 
                         if (!errorMessage.isNullOrBlank()) {
@@ -168,12 +249,18 @@ fun AuthScreen(
                         }
 
                         Button(
-                            onClick = onGoogleSignInClick,
+                            onClick = {
+                                if (authTab == 0) {
+                                    onSignInClick(serverUrl, usernameOrEmail, password)
+                                } else {
+                                    onRegisterClick(serverUrl, registerUsername, registerEmail, password)
+                                }
+                            },
                             enabled = !isSigningIn,
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .height(52.dp)
-                                .testTag("google_sign_in_button"),
+                                .testTag("online_sign_in_button"),
                         ) {
                             if (isSigningIn) {
                                 CircularProgressIndicator(
@@ -182,11 +269,11 @@ fun AuthScreen(
                                     color = MaterialTheme.colorScheme.onPrimary,
                                 )
                                 Spacer(Modifier.width(10.dp))
-                                Text("Signing in...")
+                                Text("Connecting...")
                             } else {
                                 Icon(Icons.Default.AutoAwesome, contentDescription = null)
                                 Spacer(Modifier.width(8.dp))
-                                Text(stringResource(R.string.sign_in_google))
+                                Text(if (authTab == 0) stringResource(R.string.sign_in_online) else "Register & Connect")
                             }
                         }
 
@@ -489,7 +576,7 @@ fun HomeScreen(
                         } else if (isOnline) {
                             "Create or join rated Arena, Swiss, or Simul events"
                         } else {
-                            "Sign in with Google to join live ChessHub Arena & Swiss tournaments"
+                            "Sign in to ChessHub Online to join live Arena & Swiss tournaments"
                         },
                         icon = Icons.Default.EmojiEvents,
                         actionLabel = if (isOnline) "Open Hub" else "Sign In",
