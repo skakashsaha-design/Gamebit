@@ -1,19 +1,16 @@
-name: Diagnose ChessHub Kotlin Build
+name: Diagnose ChessHub Kotlin
 
 on:
+  workflow_dispatch:
   push:
     branches: [ main, master ]
-  pull_request:
-    branches: [ main, master ]
-  workflow_dispatch:
 
 jobs:
   diagnose:
-    name: Diagnose Kotlin Compilation
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
 
       - name: Set up JDK 17
@@ -21,7 +18,6 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
-          cache: gradle
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v4
@@ -32,14 +28,6 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '9.3.1'
-
-      - name: Check environment
-        run: |
-          java -version
-          gradle --version
-          echo "ANDROID_HOME=$ANDROID_HOME"
-          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
-          sdkmanager --version
 
       - name: Create debug keystore
         run: |
@@ -53,9 +41,42 @@ jobs:
             -validity 10000 \
             -dname "CN=Android Debug,O=Android,C=US"
 
-      - name: Compile Kotlin
+      - name: Compile Kotlin and capture errors
+        shell: bash
         run: |
+          set +e
+
           gradle :app:compileDebugKotlin \
             --stacktrace \
             --info \
-            --console=plain
+            --console=plain \
+            2>&1 | tee kotlin-build.log
+
+          EXIT_CODE=${PIPESTATUS[0]}
+
+          echo ""
+          echo "========================================"
+          echo "KOTLIN COMPILER ERRORS"
+          echo "========================================"
+
+          grep -E "^e:|^error:|Compilation error" kotlin-build.log || true
+
+          echo ""
+          echo "========================================"
+          echo "SOURCE FILE ERRORS"
+          echo "========================================"
+
+          grep -E "file:///.*\.kt:[0-9]+:[0-9]+" kotlin-build.log || true
+
+          echo ""
+          echo "Gradle exit code: $EXIT_CODE"
+
+          exit $EXIT_CODE
+
+      - name: Upload Kotlin log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kotlin-build-log
+          path: kotlin-build.log
+          if-no-files-found: warn
