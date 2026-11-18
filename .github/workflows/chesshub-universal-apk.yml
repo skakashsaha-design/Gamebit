@@ -53,23 +53,30 @@ jobs:
             "platforms;android-36" \
             "build-tools;36.0.0"
 
-      - name: Set executable permission
-        shell: bash
-        run: |
-          chmod +x gradlew
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.3.1'
 
-      - name: Check Gradle
+      - name: Check project
         shell: bash
         run: |
-          ./gradlew --version
+          echo "Current directory:"
+          pwd
+
+          echo ""
+          echo "Project files:"
+          find . -maxdepth 2 -type f | sort | head -200
+
+          echo ""
+          echo "Gradle version:"
+          gradle --version
 
       - name: Prepare project
         shell: bash
         env:
           GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
         run: |
-          echo "Checking project..."
-
           if [ ! -f .env ] && [ -f .env.example ]; then
             cp .env.example .env
           fi
@@ -93,33 +100,21 @@ jobs:
           echo "Creating debug keystore..."
 
           if [ ! -f debug.keystore ]; then
-            if [ -f debug.keystore.base64 ]; then
-              tr -d '[:space:]' < debug.keystore.base64 | base64 -d > debug.keystore || rm -f debug.keystore
-
-              if [ -f debug.keystore ] && ! keytool -list \
-                -keystore debug.keystore \
-                -storepass android >/dev/null 2>&1; then
-                rm -f debug.keystore
-              fi
-            fi
-
-            if [ ! -f debug.keystore ]; then
-              keytool -genkeypair -v \
-                -keystore debug.keystore \
-                -storepass android \
-                -alias androiddebugkey \
-                -keypass android \
-                -keyalg RSA \
-                -keysize 2048 \
-                -validity 10000 \
-                -dname "CN=Android Debug,O=Android,C=US"
-            fi
+            keytool -genkeypair -v \
+              -keystore debug.keystore \
+              -storepass android \
+              -alias androiddebugkey \
+              -keypass android \
+              -keyalg RSA \
+              -keysize 2048 \
+              -validity 10000 \
+              -dname "CN=Android Debug,O=Android,C=US"
           fi
 
       - name: Build Debug APK
         shell: bash
         run: |
-          ./gradlew :app:assembleDebug \
+          gradle :app:assembleDebug \
             --no-daemon \
             --stacktrace \
             -Dorg.gradle.workers.max=2 \
@@ -134,7 +129,7 @@ jobs:
             echo "ERROR: APK was not generated."
 
             echo "Available APK files:"
-            find app/build/outputs -type f -name "*.apk" -print 2>/dev/null || true
+            find . -type f -name "*.apk" -print 2>/dev/null || true
 
             exit 1
           fi
@@ -150,17 +145,11 @@ jobs:
         run: |
           mkdir -p dist
 
-          cp \
-            app/build/outputs/apk/debug/app-debug.apk \
+          cp app/build/outputs/apk/debug/app-debug.apk \
             dist/ChessHub-debug.apk
 
-          sha256sum dist/ChessHub-debug.apk > dist/SHA256SUMS.txt
-
-          echo "APK:"
-          ls -lh dist/ChessHub-debug.apk
-
-          echo "SHA-256:"
-          cat dist/SHA256SUMS.txt
+          sha256sum dist/ChessHub-debug.apk \
+            > dist/SHA256SUMS.txt
 
           {
             echo "## ChessHub APK"
@@ -214,9 +203,69 @@ jobs:
             exit 1
           fi
 
+          echo "Using sdkmanager: $SDK_MANAGER"
+
           yes | "$SDK_MANAGER" --sdk_root="$SDK_ROOT" --licenses >/dev/null 2>&1 || true
 
           "$SDK_MANAGER" --sdk_root="$SDK_ROOT" \
             "platform-tools" \
             "platforms;android-36" \
-            "build
+            "build-tools;36.0.0"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.3.1'
+
+      - name: Check Gradle
+        run: |
+          gradle --version
+
+      - name: Prepare test environment
+        shell: bash
+        run: |
+          if [ ! -f .env ] && [ -f .env.example ]; then
+            cp .env.example .env
+          fi
+
+          if [ ! -f debug.keystore ]; then
+            keytool -genkeypair -v \
+              -keystore debug.keystore \
+              -storepass android \
+              -alias androiddebugkey \
+              -keypass android \
+              -keyalg RSA \
+              -keysize 2048 \
+              -validity 10000 \
+              -dname "CN=Android Debug,O=Android,C=US"
+          fi
+
+      - name: Run Unit Tests
+        shell: bash
+        run: |
+          gradle :app:testDebugUnitTest \
+            --no-daemon \
+            --stacktrace \
+            -Dorg.gradle.workers.max=2 \
+            "-Dorg.gradle.jvmargs=-Xmx2560m -XX:MaxMetaspaceSize=768m -Dfile.encoding=UTF-8"
+
+      - name: Run Android Lint
+        shell: bash
+        run: |
+          gradle :app:lintDebug \
+            --no-daemon \
+            --stacktrace \
+            -Dorg.gradle.workers.max=2 \
+            "-Dorg.gradle.jvmargs=-Xmx2560m -XX:MaxMetaspaceSize=768m -Dfile.encoding=UTF-8"
+
+      - name: Upload Test & Lint Reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ChessHub-Reports
+          if-no-files-found: ignore
+          path: |
+            app/build/reports/tests/testDebugUnitTest/
+            app/build/reports/lint-results-debug.html
+            app/build/reports/lint-results-debug.xml
+          retention-days: 14
