@@ -9,7 +9,7 @@ on:
 
 jobs:
   build:
-    name: Build ChessHub APK
+    name: Test, Lint & Build ChessHub APK
     runs-on: ubuntu-latest
 
     steps:
@@ -24,22 +24,26 @@ jobs:
           cache: gradle
 
       - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@v4
+        with:
+          packages: 'platform-tools'
 
-      - name: Install Gradle
+      - name: Check Android SDK
+        run: |
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
+          sdkmanager --version
+          adb version
+
+      - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '9.3.1'
 
-      - name: Check Java and Android SDK
+      - name: Check Gradle
         run: |
           java -version
-          echo "ANDROID_HOME=$ANDROID_HOME"
-          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
-          sdkmanager --version
-
-      - name: Check Gradle
-        run: gradle --version
+          gradle --version
 
       - name: Create debug keystore
         run: |
@@ -67,8 +71,11 @@ jobs:
       - name: Prepare APK
         run: |
           mkdir -p dist
+
           cp app/build/outputs/apk/debug/app-debug.apk \
             dist/ChessHub-universal-debug.apk
+
+          echo "APK successfully created:"
           ls -lh dist/
 
       - name: Upload APK
@@ -77,8 +84,9 @@ jobs:
           name: ChessHub-Universal-APK
           path: dist/*.apk
           retention-days: 30
+          if-no-files-found: error
 
-      - name: Upload Reports
+      - name: Upload Test and Lint Reports
         if: always()
         uses: actions/upload-artifact@v4
         with:
