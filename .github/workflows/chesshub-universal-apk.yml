@@ -23,38 +23,39 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up JDK 21 (Temurin)
-        uses: actions/setup-java@v4
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
-          java-version: '21'
+          java-version: '17'
 
       - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@v4
 
-      - name: Install Android 36.1 SDK & Accept Licenses
+      - name: Install Android SDK
         shell: bash
         run: |
           SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
           SDK_MANAGER="$(command -v sdkmanager || find "$SDK_ROOT" -maxdepth 5 -name sdkmanager -type f 2>/dev/null | head -n 1)"
+
           if [ -z "$SDK_MANAGER" ]; then
-            echo "ERROR: sdkmanager not found under $SDK_ROOT"
+            echo "ERROR: sdkmanager not found."
             exit 1
           fi
-          echo "Using sdkmanager: $SDK_MANAGER"
-          yes | "$SDK_MANAGER" --sdk_root="$SDK_ROOT" --licenses > /dev/null 2>&1 || true
+
+          yes | "$SDK_MANAGER" --sdk_root="$SDK_ROOT" --licenses >/dev/null 2>&1 || true
+
           "$SDK_MANAGER" --sdk_root="$SDK_ROOT" \
             "platform-tools" \
-            "platforms;android-36.1" \
             "platforms;android-36" \
             "build-tools;36.0.0"
 
-      - name: Set up Gradle 9.3.1
+      - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '9.3.1'
 
-      - name: Prepare .env & Create debug.keystore
+      - name: Prepare environment
         shell: bash
         run: |
           java -version
@@ -64,87 +65,74 @@ jobs:
             cp "$GITHUB_WORKSPACE/.env.example" "$GITHUB_WORKSPACE/.env"
           fi
 
-          if [ ! -f "$GITHUB_WORKSPACE/debug.keystore" ]; then
-            keytool -genkeypair \
-              -v \
-              -keystore "$GITHUB_WORKSPACE/debug.keystore" \
-              -storepass android \
-              -alias androiddebugkey \
-              -keypass android \
-              -keyalg RSA \
-              -keysize 2048 \
-              -validity 10000 \
-              -dname "CN=Android Debug,O=Android,C=US"
-          fi
+      - name: Create debug keystore
+        shell: bash
+        working-directory: ${{ github.workspace }}
+        run: |
+          keytool -genkeypair \
+            -v \
+            -keystore "$GITHUB_WORKSPACE/debug.keystore" \
+            -storepass android \
+            -alias androiddebugkey \
+            -keypass android \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 10000 \
+            -dname "CN=Android Debug,O=Android,C=US"
 
-      - name: Verify debug.keystore
+          test -f "$GITHUB_WORKSPACE/debug.keystore"
+
+      - name: Verify debug keystore
         shell: bash
         run: |
           test -f "$GITHUB_WORKSPACE/debug.keystore"
-          keytool -list -keystore "$GITHUB_WORKSPACE/debug.keystore" -storepass android -alias androiddebugkey >/dev/null
 
-      - name: Build Universal Debug APK (single APK, all ABIs)
-        run: gradle :app:assembleDebug --no-daemon -Dorg.gradle.workers.max=2 "-Dorg.gradle.jvmargs=-Xmx3072m -XX:MaxMetaspaceSize=768m -Dfile.encoding=UTF-8"
+          keytool -list \
+            -keystore "$GITHUB_WORKSPACE/debug.keystore" \
+            -storepass android \
+            -alias androiddebugkey >/dev/null
 
-      - name: Build Signed Universal Release APK (when release secrets exist)
-        if: ${{ secrets.KEYSTORE_BASE64 != '' && secrets.STORE_PASSWORD != '' && secrets.KEY_PASSWORD != '' }}
-        shell: bash
-        env:
-          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
-          STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
-          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
-          KEYSTORE_PATH: ${{ github.workspace }}/my-upload-key.jks
+          echo "Debug keystore verified."
+
+      - name: Build Universal Debug APK
         run: |
-          trap 'rm -f "$KEYSTORE_PATH"' EXIT
-          printf '%s' "$KEYSTORE_BASE64" | tr -d '[:space:]' | base64 -d > "$KEYSTORE_PATH"
-          gradle :app:assembleRelease --no-daemon -Dorg.gradle.workers.max=2 "-Dorg.gradle.jvmargs=-Xmx3072m -XX:MaxMetaspaceSize=768m -Dfile.encoding=UTF-8"
+          gradle :app:assembleDebug \
+            --no-daemon \
+            --stacktrace \
+            -Dorg.gradle.workers.max=2 \
+            "-Dorg.gradle.jvmargs=-Xmx3072m -XX:MaxMetaspaceSize=768m -Dfile.encoding=UTF-8"
 
-      - name: Package & Verify Universal APK Artifacts
+      - name: Package Debug APK
         shell: bash
         run: |
           mkdir -p dist
-          if [ ! -f app/build/outputs/apk/debug/app-debug.apk ]; then
-            echo "ERROR: app/build/outputs/apk/debug/app-debug.apk not found"
+
+          APK="app/build/outputs/apk/debug/app-debug.apk"
+
+          if [ ! -f "$APK" ]; then
+            echo "ERROR: Debug APK was not generated."
             exit 1
           fi
-          cp app/build/outputs/apk/debug/app-debug.apk dist/ChessHub-universal-debug.apk
 
-          if [ -f app/build/outputs/apk/release/app-release.apk ]; then
-            cp app/build/outputs/apk/release/app-release.apk dist/ChessHub-universal-release.apk
-          fi
+          cp "$APK" "dist/ChessHub-universal-debug.apk"
 
           SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
           APKSIGNER="$SDK_ROOT/build-tools/36.0.0/apksigner"
+
           if [ -x "$APKSIGNER" ]; then
-            for apk in dist/*.apk; do
-              echo "Verifying APK signature: $apk"
-              "$APKSIGNER" verify --verbose "$apk"
-            done
+            "$APKSIGNER" verify --verbose "dist/ChessHub-universal-debug.apk"
           fi
 
+          sha256sum dist/ChessHub-universal-debug.apk > dist/SHA256SUMS.txt
+
           ls -lh dist/
-          sha256sum dist/*.apk > dist/SHA256SUMS.txt
-          cat dist/SHA256SUMS.txt
 
-          {
-            echo "## ChessHub Universal APK Build Summary"
-            echo ""
-            echo "| Artifact | Size | SHA-256 |"
-            echo "|---|---|---|"
-            for apk in dist/*.apk; do
-              name="$(basename "$apk")"
-              size="$(du -h "$apk" | cut -f1)"
-              hash="$(sha256sum "$apk" | awk '{print $1}')"
-              echo "| \`$name\` | $size | \`$hash\` |"
-            done
-          } >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Upload Universal APK Artifacts
+      - name: Upload Debug APK
         uses: actions/upload-artifact@v4
         with:
-          name: ChessHub-Universal-APK
+          name: ChessHub-Universal-Debug-APK
           path: |
-            dist/*.apk
+            dist/ChessHub-universal-debug.apk
             dist/SHA256SUMS.txt
           retention-days: 30
 
@@ -156,37 +144,39 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up JDK 21 (Temurin)
-        uses: actions/setup-java@v4
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
-          java-version: '21'
+          java-version: '17'
 
       - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@v4
 
-      - name: Install Android 36.1 SDK & Accept Licenses
+      - name: Install Android SDK
         shell: bash
         run: |
           SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
           SDK_MANAGER="$(command -v sdkmanager || find "$SDK_ROOT" -maxdepth 5 -name sdkmanager -type f 2>/dev/null | head -n 1)"
+
           if [ -z "$SDK_MANAGER" ]; then
-            echo "ERROR: sdkmanager not found under $SDK_ROOT"
+            echo "ERROR: sdkmanager not found."
             exit 1
           fi
-          yes | "$SDK_MANAGER" --sdk_root="$SDK_ROOT" --licenses > /dev/null 2>&1 || true
+
+          yes | "$SDK_MANAGER" --sdk_root="$SDK_ROOT" --licenses >/dev/null 2>&1 || true
+
           "$SDK_MANAGER" --sdk_root="$SDK_ROOT" \
             "platform-tools" \
-            "platforms;android-36.1" \
             "platforms;android-36" \
             "build-tools;36.0.0"
 
-      - name: Set up Gradle 9.3.1
+      - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '9.3.1'
 
-      - name: Prepare .env & Create debug.keystore
+      - name: Prepare environment
         shell: bash
         run: |
           java -version
@@ -196,33 +186,53 @@ jobs:
             cp "$GITHUB_WORKSPACE/.env.example" "$GITHUB_WORKSPACE/.env"
           fi
 
-          if [ ! -f "$GITHUB_WORKSPACE/debug.keystore" ]; then
-            keytool -genkeypair \
-              -v \
-              -keystore "$GITHUB_WORKSPACE/debug.keystore" \
-              -storepass android \
-              -alias androiddebugkey \
-              -keypass android \
-              -keyalg RSA \
-              -keysize 2048 \
-              -validity 10000 \
-              -dname "CN=Android Debug,O=Android,C=US"
-          fi
+      - name: Create debug keystore
+        shell: bash
+        working-directory: ${{ github.workspace }}
+        run: |
+          keytool -genkeypair \
+            -v \
+            -keystore "$GITHUB_WORKSPACE/debug.keystore" \
+            -storepass android \
+            -alias androiddebugkey \
+            -keypass android \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 10000 \
+            -dname "CN=Android Debug,O=Android,C=US"
 
-      - name: Verify debug.keystore
+          test -f "$GITHUB_WORKSPACE/debug.keystore"
+
+      - name: Verify debug keystore
         shell: bash
         run: |
           test -f "$GITHUB_WORKSPACE/debug.keystore"
-          keytool -list -keystore "$GITHUB_WORKSPACE/debug.keystore" -storepass android -alias androiddebugkey >/dev/null
+
+          keytool -list \
+            -keystore "$GITHUB_WORKSPACE/debug.keystore" \
+            -storepass android \
+            -alias androiddebugkey >/dev/null
+
+          echo "Debug keystore verified."
 
       - name: Run Unit and Robolectric Tests
-        run: gradle :app:testDebugUnitTest --no-daemon --stacktrace -Dorg.gradle.workers.max=2 "-Dorg.gradle.jvmargs=-Xmx3072m -XX:MaxMetaspaceSize=768m -Dfile.encoding=UTF-8"
+        run: |
+          gradle :app:testDebugUnitTest \
+            --no-daemon \
+            --stacktrace \
+            -Dorg.gradle.workers.max=2 \
+            "-Dorg.gradle.jvmargs=-Xmx3072m -XX:MaxMetaspaceSize=768m -Dfile.encoding=UTF-8"
 
       - name: Run Android Lint
-        run: gradle :app:lintDebug --no-daemon --stacktrace -Dorg.gradle.workers.max=2 "-Dorg.gradle.jvmargs=-Xmx3072m -XX:MaxMetaspaceSize=768m -Dfile.encoding=UTF-8"
+        run: |
+          gradle :app:lintDebug \
+            --no-daemon \
+            --stacktrace \
+            -Dorg.gradle.workers.max=2 \
+            "-Dorg.gradle.jvmargs=-Xmx3072m -XX:MaxMetaspaceSize=768m -Dfile.encoding=UTF-8"
 
-      - name: Upload Test & Lint Reports
-        if: always()
+      - name: Upload Test and Lint Reports
+        if: ${{ always() }}
         uses: actions/upload-artifact@v4
         with:
           name: ChessHub-Reports
