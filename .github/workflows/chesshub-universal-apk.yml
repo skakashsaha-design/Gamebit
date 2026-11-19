@@ -15,12 +15,16 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+
+  # ============================================================
+  # BUILD APK
+  # ============================================================
   build-universal-apk:
-    name: Build Universal APK
+    name: Build Universal Debug APK
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
 
       - name: Set up JDK 17
@@ -32,21 +36,9 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v4
 
-      - name: Install Android SDK
-        shell: bash
+      - name: Install Android SDK packages
         run: |
-          SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
-          SDK_MANAGER="$(command -v sdkmanager || find "$SDK_ROOT" -maxdepth 5 -name sdkmanager -type f 2>/dev/null | head -n 1)"
-
-          if [ -z "$SDK_MANAGER" ]; then
-            echo "ERROR: sdkmanager not found."
-            exit 1
-          fi
-
-          yes | "$SDK_MANAGER" --sdk_root="$SDK_ROOT" --licenses >/dev/null 2>&1 || true
-
-          "$SDK_MANAGER" --sdk_root="$SDK_ROOT" \
-            "platform-tools" \
+          sdkmanager "platform-tools" \
             "platforms;android-36" \
             "build-tools;36.0.0"
 
@@ -55,44 +47,38 @@ jobs:
         with:
           gradle-version: '9.3.1'
 
-      - name: Prepare environment
-        shell: bash
-        run: |
-          java -version
-          gradle --version
-
-          if [ ! -f "$GITHUB_WORKSPACE/.env" ] && [ -f "$GITHUB_WORKSPACE/.env.example" ]; then
-            cp "$GITHUB_WORKSPACE/.env.example" "$GITHUB_WORKSPACE/.env"
-          fi
-
+      # Keep the existing debug signing configuration working.
       - name: Create debug keystore
         shell: bash
         working-directory: ${{ github.workspace }}
         run: |
-          keytool -genkeypair \
-            -v \
-            -keystore "$GITHUB_WORKSPACE/debug.keystore" \
-            -storepass android \
-            -alias androiddebugkey \
-            -keypass android \
-            -keyalg RSA \
-            -keysize 2048 \
-            -validity 10000 \
-            -dname "CN=Android Debug,O=Android,C=US"
+          if [ ! -f "$GITHUB_WORKSPACE/debug.keystore" ]; then
+            keytool -genkeypair \
+              -v \
+              -keystore "$GITHUB_WORKSPACE/debug.keystore" \
+              -storepass android \
+              -alias androiddebugkey \
+              -keypass android \
+              -keyalg RSA \
+              -keysize 2048 \
+              -validity 10000 \
+              -dname "CN=Android Debug,O=Android,C=US"
+          fi
 
           test -f "$GITHUB_WORKSPACE/debug.keystore"
 
       - name: Verify debug keystore
-        shell: bash
         run: |
-          test -f "$GITHUB_WORKSPACE/debug.keystore"
-
           keytool -list \
             -keystore "$GITHUB_WORKSPACE/debug.keystore" \
-            -storepass android \
-            -alias androiddebugkey >/dev/null
+            -storepass android
 
-          echo "Debug keystore verified."
+      - name: Create .env if missing
+        shell: bash
+        run: |
+          if [ ! -f ".env" ]; then
+            touch .env
+          fi
 
       - name: Build Universal Debug APK
         run: |
@@ -102,72 +88,68 @@ jobs:
             -Dorg.gradle.workers.max=2 \
             "-Dorg.gradle.jvmargs=-Xmx3072m -XX:MaxMetaspaceSize=768m -Dfile.encoding=UTF-8"
 
-      - name: Package Debug APK
+      - name: Verify APK exists
         shell: bash
         run: |
-          mkdir -p dist
+          set -e
 
           APK="app/build/outputs/apk/debug/app-debug.apk"
 
           if [ ! -f "$APK" ]; then
-            echo "ERROR: Debug APK was not generated."
+            echo "ERROR: APK was not created."
+            find app/build/outputs -type f -maxdepth 6 || true
             exit 1
           fi
 
-          cp "$APK" "dist/ChessHub-universal-debug.apk"
+          echo "APK successfully created:"
+          ls -lh "$APK"
 
-          SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
-          APKSIGNER="$SDK_ROOT/build-tools/36.0.0/apksigner"
+      - name: Verify APK signature
+        run: |
+          $ANDROID_HOME/build-tools/36.0.0/apksigner verify \
+            --verbose \
+            app/build/outputs/apk/debug/app-debug.apk
 
-          if [ -x "$APKSIGNER" ]; then
-            "$APKSIGNER" verify --verbose "dist/ChessHub-universal-debug.apk"
-          fi
+      - name: Copy APK with clear filename
+        run: |
+          mkdir -p artifacts
+          cp app/build/outputs/apk/debug/app-debug.apk \
+            artifacts/ChessHub-debug.apk
 
-          sha256sum dist/ChessHub-universal-debug.apk > dist/SHA256SUMS.txt
-
-          ls -lh dist/
-
-      - name: Upload Debug APK
+      - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: ChessHub-Universal-Debug-APK
-          path: |
-            dist/ChessHub-universal-debug.apk
-            dist/SHA256SUMS.txt
-          retention-days: 30
+          path: artifacts/ChessHub-debug.apk
+          if-no-files-found: error
+          retention-days: 14
 
+
+  # ============================================================
+  # UNIT + ROBOLECTRIC + LINT
+  # ============================================================
   test-and-lint:
-    name: Unit Tests & Android Lint
+    name: Unit + Robolectric Tests + Lint
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up JDK 17
+      # IMPORTANT:
+      # Robolectric + Android API 36 should run on JDK 21.
+      - name: Set up JDK 21
         uses: actions/setup-java@v5
         with:
           distribution: temurin
-          java-version: '17'
+          java-version: '21'
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v4
 
-      - name: Install Android SDK
-        shell: bash
+      - name: Install Android SDK packages
         run: |
-          SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
-          SDK_MANAGER="$(command -v sdkmanager || find "$SDK_ROOT" -maxdepth 5 -name sdkmanager -type f 2>/dev/null | head -n 1)"
-
-          if [ -z "$SDK_MANAGER" ]; then
-            echo "ERROR: sdkmanager not found."
-            exit 1
-          fi
-
-          yes | "$SDK_MANAGER" --sdk_root="$SDK_ROOT" --licenses >/dev/null 2>&1 || true
-
-          "$SDK_MANAGER" --sdk_root="$SDK_ROOT" \
-            "platform-tools" \
+          sdkmanager "platform-tools" \
             "platforms;android-36" \
             "build-tools;36.0.0"
 
@@ -176,44 +158,41 @@ jobs:
         with:
           gradle-version: '9.3.1'
 
-      - name: Prepare environment
-        shell: bash
-        run: |
-          java -version
-          gradle --version
-
-          if [ ! -f "$GITHUB_WORKSPACE/.env" ] && [ -f "$GITHUB_WORKSPACE/.env.example" ]; then
-            cp "$GITHUB_WORKSPACE/.env.example" "$GITHUB_WORKSPACE/.env"
-          fi
-
+      # Robolectric tests use the same debug signing configuration
+      # as the debug APK build.
       - name: Create debug keystore
         shell: bash
         working-directory: ${{ github.workspace }}
         run: |
-          keytool -genkeypair \
-            -v \
-            -keystore "$GITHUB_WORKSPACE/debug.keystore" \
-            -storepass android \
-            -alias androiddebugkey \
-            -keypass android \
-            -keyalg RSA \
-            -keysize 2048 \
-            -validity 10000 \
-            -dname "CN=Android Debug,O=Android,C=US"
+          if [ ! -f "$GITHUB_WORKSPACE/debug.keystore" ]; then
+            keytool -genkeypair \
+              -v \
+              -keystore "$GITHUB_WORKSPACE/debug.keystore" \
+              -storepass android \
+              -alias androiddebugkey \
+              -keypass android \
+              -keyalg RSA \
+              -keysize 2048 \
+              -validity 10000 \
+              -dname "CN=Android Debug,O=Android,C=US"
+          fi
 
           test -f "$GITHUB_WORKSPACE/debug.keystore"
 
-      - name: Verify debug keystore
+      - name: Create .env if missing
         shell: bash
         run: |
-          test -f "$GITHUB_WORKSPACE/debug.keystore"
+          if [ ! -f ".env" ]; then
+            touch .env
+          fi
 
-          keytool -list \
-            -keystore "$GITHUB_WORKSPACE/debug.keystore" \
-            -storepass android \
-            -alias androiddebugkey >/dev/null
+      - name: Show Java version
+        run: |
+          java -version
 
-          echo "Debug keystore verified."
+      - name: Show Gradle version
+        run: |
+          gradle --version
 
       - name: Run Unit and Robolectric Tests
         run: |
@@ -230,15 +209,3 @@ jobs:
             --stacktrace \
             -Dorg.gradle.workers.max=2 \
             "-Dorg.gradle.jvmargs=-Xmx3072m -XX:MaxMetaspaceSize=768m -Dfile.encoding=UTF-8"
-
-      - name: Upload Test and Lint Reports
-        if: ${{ always() }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: ChessHub-Reports
-          if-no-files-found: ignore
-          path: |
-            app/build/reports/tests/testDebugUnitTest/
-            app/build/reports/lint-results-debug.html
-            app/build/reports/lint-results-debug.xml
-          retention-days: 14
