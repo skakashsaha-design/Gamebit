@@ -3,217 +3,150 @@ name: ChessHub Universal APK CI
 on:
   push:
     branches:
-      - '**'
+      - main
+      - master
   pull_request:
+    branches:
+      - main
+      - master
   workflow_dispatch:
 
 permissions:
   contents: read
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
-
 jobs:
-  build-universal-apk:
-    name: Build Universal APK
+  build:
+    name: Build ChessHub APK
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up JDK 21 (Temurin)
-        uses: actions/setup-java@v4
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
-          java-version: '21'
+          java-version: '17'
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v4
 
-      - name: Install Android 36.1 SDK & Accept Licenses
-        shell: bash
+      - name: Install Android SDK packages
         run: |
-          SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
-          SDK_MANAGER="$(command -v sdkmanager || find "$SDK_ROOT" -maxdepth 5 -name sdkmanager -type f 2>/dev/null | head -n 1)"
-          if [ -z "$SDK_MANAGER" ]; then
-            echo "ERROR: sdkmanager not found under $SDK_ROOT"
-            exit 1
-          fi
-          echo "Using sdkmanager: $SDK_MANAGER"
-          yes | "$SDK_MANAGER" --sdk_root="$SDK_ROOT" --licenses > /dev/null 2>&1 || true
-          "$SDK_MANAGER" --sdk_root="$SDK_ROOT" \
-            "platform-tools" \
-            "platforms;android-36.1" \
-            "platforms;android-36" \
-            "build-tools;36.0.0"
+          sdkmanager "platform-tools"
+          sdkmanager "platforms;android-36"
+          sdkmanager "build-tools;36.0.0"
 
-      - name: Set up Gradle 9.3.1
+      - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '9.3.1'
 
-      - name: Prepare .env & Debug Keystore
-        shell: bash
+      - name: Check project
         run: |
-          gradle --version
+          echo "Checking project files..."
+          test -f settings.gradle.kts || test -f settings.gradle
+          test -f app/build.gradle.kts || test -f app/build.gradle
+          echo "Project structure OK"
 
-          if [ ! -f .env ] && [ -f .env.example ]; then
-            cp .env.example .env
-          fi
-
-          if [ ! -f debug.keystore ]; then
-            if [ -f debug.keystore.base64 ]; then
-              tr -d '[:space:]' < debug.keystore.base64 | base64 -d > debug.keystore || rm -f debug.keystore
-              if [ -f debug.keystore ] && ! keytool -list -keystore debug.keystore -storepass android >/dev/null 2>&1; then
-                rm -f debug.keystore
-              fi
-            fi
-            if [ ! -f debug.keystore ]; then
-              keytool -genkeypair -v \
-                -keystore debug.keystore \
-                -storepass android \
-                -alias androiddebugkey \
-                -keypass android \
-                -keyalg RSA \
-                -keysize 2048 \
-                -validity 10000 \
-                -dname "CN=Android Debug,O=Android,C=US"
-            fi
-          fi
-
-      - name: Build Universal Debug APK (single APK, all ABIs)
-        run: gradle :app:assembleDebug --no-daemon -Dorg.gradle.workers.max=2 "-Dorg.gradle.jvmargs=-Xmx2560m -XX:MaxMetaspaceSize=768m -Dfile.encoding=UTF-8"
-
-      - name: Build Signed Universal Release APK (when release secrets exist)
-        if: ${{ secrets.KEYSTORE_BASE64 != '' && secrets.STORE_PASSWORD != '' && secrets.KEY_PASSWORD != '' }}
-        shell: bash
-        env:
-          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
-          STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
-          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
-          KEYSTORE_PATH: ${{ github.workspace }}/my-upload-key.jks
+      - name: Check Firebase configuration
         run: |
-          trap 'rm -f "$KEYSTORE_PATH"' EXIT
-          printf '%s' "$KEYSTORE_BASE64" | tr -d '[:space:]' | base64 -d > "$KEYSTORE_PATH"
-          gradle :app:assembleRelease --no-daemon -Dorg.gradle.workers.max=2 "-Dorg.gradle.jvmargs=-Xmx2560m -XX:MaxMetaspaceSize=768m -Dfile.encoding=UTF-8"
+          echo "Firebase build configuration should be removed."
+          echo "google-services.json may remain as an unused file."
 
-      - name: Package & Verify Universal APK Artifacts
-        shell: bash
-        run: |
-          mkdir -p dist
-          if [ ! -f app/build/outputs/apk/debug/app-debug.apk ]; then
-            echo "ERROR: app/build/outputs/apk/debug/app-debug.apk not found"
+          if grep -R "com.google.gms.google-services" \
+            --include="*.gradle" \
+            --include="*.gradle.kts" \
+            . 2>/dev/null; then
+            echo "ERROR: Google Services Gradle plugin is still configured."
             exit 1
           fi
-          cp app/build/outputs/apk/debug/app-debug.apk dist/ChessHub-universal-debug.apk
 
-          if [ -f app/build/outputs/apk/release/app-release.apk ]; then
-            cp app/build/outputs/apk/release/app-release.apk dist/ChessHub-universal-release.apk
+          echo "No active Google Services Gradle plugin found."
+
+      - name: Create debug keystore
+        run: |
+          mkdir -p ~/.android
+
+          if [ ! -f ~/.android/debug.keystore ]; then
+            keytool -genkeypair \
+              -v \
+              -keystore ~/.android/debug.keystore \
+              -storepass android \
+              -alias androiddebugkey \
+              -keypass android \
+              -keyalg RSA \
+              -keysize 2048 \
+              -validity 10000 \
+              -dname "CN=Android Debug,O=Android,C=US"
           fi
 
-          ls -lh dist/
-          sha256sum dist/*.apk > dist/SHA256SUMS.txt
-          cat dist/SHA256SUMS.txt
+      - name: Build Debug APK
+        run: |
+          gradle :app:assembleDebug --stacktrace --no-daemon
 
-          {
-            echo "## ChessHub Universal APK Build Summary"
-            echo ""
-            echo "| Artifact | Size | SHA-256 |"
-            echo "|---|---|---|"
-            for apk in dist/*.apk; do
-              name="$(basename "$apk")"
-              size="$(du -h "$apk" | cut -f1)"
-              hash="$(sha256sum "$apk" | awk '{print $1}')"
-              echo "| \`$name\` | $size | \`$hash\` |"
-            done
-          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Verify APK
+        run: |
+          APK_PATH="app/build/outputs/apk/debug/app-debug.apk"
 
-      - name: Upload Universal APK Artifacts
+          if [ ! -f "$APK_PATH" ]; then
+            echo "ERROR: APK was not generated."
+            exit 1
+          fi
+
+          echo "APK successfully generated:"
+          ls -lh "$APK_PATH"
+
+      - name: Calculate SHA256
+        run: |
+          sha256sum app/build/outputs/apk/debug/app-debug.apk
+
+      - name: Prepare APK artifact
+        run: |
+          mkdir -p dist
+          cp app/build/outputs/apk/debug/app-debug.apk \
+             dist/ChessHub-debug.apk
+
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: ChessHub-Universal-APK
-          path: |
-            dist/*.apk
-            dist/SHA256SUMS.txt
-          retention-days: 30
+          name: ChessHub-debug-apk
+          path: dist/ChessHub-debug.apk
+          if-no-files-found: error
 
-  test-and-lint:
-    name: Unit Tests & Android Lint
+  test:
+    name: Test and Lint
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up JDK 21 (Temurin)
-        uses: actions/setup-java@v4
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
-          java-version: '21'
+          java-version: '17'
 
       - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@v4
 
-      - name: Install Android 36.1 SDK & Accept Licenses
-        shell: bash
+      - name: Install Android SDK packages
         run: |
-          SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
-          SDK_MANAGER="$(command -v sdkmanager || find "$SDK_ROOT" -maxdepth 5 -name sdkmanager -type f 2>/dev/null | head -n 1)"
-          if [ -z "$SDK_MANAGER" ]; then
-            echo "ERROR: sdkmanager not found under $SDK_ROOT"
-            exit 1
-          fi
-          yes | "$SDK_MANAGER" --sdk_root="$SDK_ROOT" --licenses > /dev/null 2>&1 || true
-          "$SDK_MANAGER" --sdk_root="$SDK_ROOT" \
-            "platform-tools" \
-            "platforms;android-36.1" \
-            "platforms;android-36" \
-            "build-tools;36.0.0"
+          sdkmanager "platform-tools"
+          sdkmanager "platforms;android-36"
+          sdkmanager "build-tools;36.0.0"
 
-      - name: Set up Gradle 9.3.1
+      - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '9.3.1'
 
-      - name: Prepare .env & Debug Keystore
-        shell: bash
+      - name: Run unit tests
         run: |
-          if [ ! -f .env ] && [ -f .env.example ]; then
-            cp .env.example .env
-          fi
-          if [ ! -f debug.keystore ]; then
-            if [ -f debug.keystore.base64 ]; then
-              tr -d '[:space:]' < debug.keystore.base64 | base64 -d > debug.keystore || rm -f debug.keystore
-            fi
-            if [ ! -f debug.keystore ]; then
-              keytool -genkeypair -v \
-                -keystore debug.keystore \
-                -storepass android \
-                -alias androiddebugkey \
-                -keypass android \
-                -keyalg RSA \
-                -keysize 2048 \
-                -validity 10000 \
-                -dname "CN=Android Debug,O=Android,C=US"
-            fi
-          fi
+          gradle :app:testDebugUnitTest --stacktrace --no-daemon
 
-      - name: Run Unit and Robolectric Tests
-        run: gradle :app:testDebugUnitTest --no-daemon -Dorg.gradle.workers.max=2 "-Dorg.gradle.jvmargs=-Xmx2560m -XX:MaxMetaspaceSize=768m -Dfile.encoding=UTF-8"
-
-      - name: Run Android Lint
-        run: gradle :app:lintDebug --no-daemon -Dorg.gradle.workers.max=2 "-Dorg.gradle.jvmargs=-Xmx2560m -XX:MaxMetaspaceSize=768m -Dfile.encoding=UTF-8"
-
-      - name: Upload Test & Lint Reports
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: ChessHub-Reports
-          if-no-files-found: ignore
-          path: |
-            app/build/reports/tests/testDebugUnitTest/
-            app/build/reports/lint-results-debug.html
-            app/build/reports/lint-results-debug.xml
-          retention-days: 14
+      - name: Run lint
+        run: |
+          gradle :app:lintDebug --stacktrace --no-daemon
