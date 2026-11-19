@@ -1,5 +1,6 @@
 package com.example.ui.screens
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -21,23 +22,32 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Undo
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Analytics
+import androidx.compose.material.icons.filled.Animation
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.BookmarkBorder
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Extension
+import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.FlipCameraAndroid
 import androidx.compose.material.icons.filled.Lightbulb
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.School
 import androidx.compose.material.icons.filled.Timer
+import androidx.compose.material.icons.filled.TipsAndUpdates
+import androidx.compose.material.icons.filled.TrendingUp
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -64,11 +74,13 @@ import com.example.chess.BoardArrow
 import com.example.chess.ChessBoardState
 import com.example.chess.Move
 import com.example.chess.MoveGenerator
+import com.example.chess.MoveQuality
 import com.example.chess.PieceColor
 import com.example.chess.Square
 import com.example.data.local.AppSettings
 import com.example.data.local.ChessLesson
 import com.example.data.local.ChessPuzzleEntity
+import com.example.data.local.EndgameExercise
 import com.example.data.local.LessonProgressEntity
 import com.example.data.local.OpeningDrill
 import com.example.data.local.PuzzleAttemptEntity
@@ -77,6 +89,7 @@ import com.example.data.local.TacticalPuzzle
 import com.example.ui.components.ChessBoardView
 import com.example.ui.theme.ChessBoardThemes
 import com.example.viewmodel.CoordinateTrainerState
+import com.example.viewmodel.EndgameTrainerState
 import com.example.viewmodel.OpeningDrillSessionState
 import com.example.viewmodel.PuzzleMode
 import com.example.viewmodel.PuzzleSessionState
@@ -90,6 +103,7 @@ fun LearnScreen(
     lessonProgress: List<LessonProgressEntity>,
     drillState: OpeningDrillSessionState,
     coordState: CoordinateTrainerState,
+    endgameState: EndgameTrainerState = EndgameTrainerState(),
     onSelectPuzzleMode: (PuzzleMode, String) -> Unit,
     onSelectTheme: (String) -> Unit,
     onSelectDifficultyBand: (String) -> Unit,
@@ -106,6 +120,14 @@ fun LearnScreen(
     onSubmitDrillMove: (Move) -> Unit,
     onStartCoordTrainer: (Boolean) -> Unit,
     onTapCoordSquare: (Square) -> Unit,
+    onSelectEndgameExercise: (EndgameExercise) -> Unit = {},
+    onSubmitEndgameMove: (Move) -> Unit = {},
+    onUndoEndgameMove: () -> Unit = {},
+    onResetEndgameExercise: () -> Unit = {},
+    onToggleEndgameCoach: (Boolean) -> Unit = {},
+    onToggleEndgameBestArrow: () -> Unit = {},
+    onAnalyzeEndgameNow: () -> Unit = {},
+    onToggleMoveAnimation: (Boolean) -> Unit = {},
     onPracticeEndgameInPlay: (String) -> Unit,
 ) {
     var selectedTab by remember { mutableIntStateOf(0) }
@@ -116,11 +138,11 @@ fun LearnScreen(
 
     Column(modifier = Modifier.fillMaxSize()) {
         ScrollableTabRow(selectedTabIndex = selectedTab, edgePadding = 8.dp) {
-            Tab(selected = selectedTab == 0, onClick = { selectedTab = 0 }, text = { Text("Puzzles") })
-            Tab(selected = selectedTab == 1, onClick = { selectedTab = 1 }, text = { Text("Opening Drills") })
-            Tab(selected = selectedTab == 2, onClick = { selectedTab = 2 }, text = { Text("Lessons") })
-            Tab(selected = selectedTab == 3, onClick = { selectedTab = 3 }, text = { Text("Endgames") })
-            Tab(selected = selectedTab == 4, onClick = { selectedTab = 4 }, text = { Text("Coords") })
+            Tab(selected = selectedTab == 0, onClick = { selectedTab = 0 }, text = { Text("Puzzles") }, modifier = Modifier.testTag("learn_tab_puzzles"))
+            Tab(selected = selectedTab == 1, onClick = { selectedTab = 1 }, text = { Text("Opening Drills") }, modifier = Modifier.testTag("learn_tab_drills"))
+            Tab(selected = selectedTab == 2, onClick = { selectedTab = 2 }, text = { Text("Lessons") }, modifier = Modifier.testTag("learn_tab_lessons"))
+            Tab(selected = selectedTab == 3, onClick = { selectedTab = 3 }, text = { Text("Endgames") }, modifier = Modifier.testTag("learn_tab_endgames"))
+            Tab(selected = selectedTab == 4, onClick = { selectedTab = 4 }, text = { Text("Coords") }, modifier = Modifier.testTag("learn_tab_coords"))
         }
 
         when (selectedTab) {
@@ -156,6 +178,17 @@ fun LearnScreen(
                 onCompleteStep = onCompleteLessonStep,
             )
             3 -> EndgamesContent(
+                settings = settings,
+                state = endgameState,
+                boardTheme = boardTheme,
+                onSelectExercise = onSelectEndgameExercise,
+                onSubmitMove = onSubmitEndgameMove,
+                onUndo = onUndoEndgameMove,
+                onReset = onResetEndgameExercise,
+                onToggleCoach = onToggleEndgameCoach,
+                onToggleBestArrow = onToggleEndgameBestArrow,
+                onAnalyzeNow = onAnalyzeEndgameNow,
+                onToggleMoveAnimation = onToggleMoveAnimation,
                 onPracticeEndgame = onPracticeEndgameInPlay,
             )
             else -> CoordinateTrainerContent(
@@ -727,34 +760,384 @@ private fun LessonsContent(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun EndgamesContent(
+    settings: AppSettings,
+    state: EndgameTrainerState,
+    boardTheme: com.example.ui.theme.BoardThemeColors,
+    onSelectExercise: (EndgameExercise) -> Unit,
+    onSubmitMove: (Move) -> Unit,
+    onUndo: () -> Unit,
+    onReset: () -> Unit,
+    onToggleCoach: (Boolean) -> Unit,
+    onToggleBestArrow: () -> Unit,
+    onAnalyzeNow: () -> Unit,
+    onToggleMoveAnimation: (Boolean) -> Unit,
     onPracticeEndgame: (String) -> Unit,
 ) {
+    val bestArrow = remember(state.showBestMoveArrow, state.coachReport?.bestMoveUci, state.exercise.id, state.boardState.positionKey()) {
+        if (!state.showBestMoveArrow) emptyList()
+        else {
+            val uci = state.coachReport?.bestMoveUci ?: state.exercise.bestStartUci
+            val f = Square.fromAlgebraic(uci.take(2))
+            val t = Square.fromAlgebraic(uci.drop(2).take(2))
+            if (f != null && t != null) listOf(BoardArrow(f, t, 0xCC10B981)) else emptyList()
+        }
+    }
+    val slideEnabled = settings.moveAnimation && !settings.reducedAnimations
+
     LazyColumn(
-        modifier = Modifier.fillMaxSize().padding(14.dp),
+        modifier = Modifier.fillMaxSize().padding(horizontal = 12.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         item {
-            Text("Endgame Practice Drills", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-            Text("Launch any key theoretical endgame directly against the ChessHub bot.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Spacer(Modifier.height(4.dp))
+            Text(
+                "Interactive Endgame Trainer",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+            )
+            Text(
+                "${state.exercise.title} • ${state.exercise.category}",
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.primary,
+            )
+            Text(
+                state.exercise.objective,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
-        items(PuzzlesAndLessonsCatalog.ENDGAMES, key = { it.id }) { eg ->
-            Card(
+
+        item {
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                items(PuzzlesAndLessonsCatalog.ENDGAMES, key = { it.id }) { eg ->
+                    FilterChip(
+                        selected = state.exercise.id == eg.id,
+                        onClick = { onSelectExercise(eg) },
+                        label = { Text(eg.title) },
+                        modifier = Modifier.testTag("endgame_chip_${eg.id}"),
+                    )
+                }
+            }
+        }
+
+        item {
+            Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                ChessBoardView(
+                    state = state.boardState,
+                    legalMoves = state.legalMoves,
+                    theme = boardTheme,
+                    modifier = Modifier.widthIn(max = 500.dp),
+                    flipped = state.humanColor == PieceColor.BLACK,
+                    interactive = !state.gameStatus.isTerminal && !state.isBotThinking,
+                    allowBothSides = false,
+                    humanSide = state.humanColor,
+                    showCoordinates = settings.showCoordinates,
+                    showLegalMoves = settings.showLegalMoves,
+                    showLastMove = settings.showLastMove,
+                    autoQueen = settings.autoQueen,
+                    pieceStyleId = settings.pieceStyleId,
+                    moveAnimation = settings.moveAnimation,
+                    reducedAnimations = settings.reducedAnimations,
+                    animationSpeed = settings.animationSpeed,
+                    lastMove = state.lastMove,
+                    arrows = bestArrow,
+                    onMoveSelected = onSubmitMove,
+                )
+            }
+        }
+
+        item {
+            val statusColor = when {
+                state.gameStatus.isTerminal -> MaterialTheme.colorScheme.primaryContainer
+                state.coachReport?.moveVerdict?.isMistake == true -> MaterialTheme.colorScheme.errorContainer
+                else -> MaterialTheme.colorScheme.surfaceVariant
+            }
+            Surface(
                 modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                shape = RoundedCornerShape(10.dp),
+                color = statusColor,
             ) {
-                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text(eg.category, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
-                    Text(eg.title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
-                    Text(eg.objective, style = MaterialTheme.typography.bodySmall)
-                    Text("Tip: ${eg.tip}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    FilledTonalButton(onClick = { onPracticeEndgame(eg.fen) }) {
-                        Text("Practice vs Bot")
+                Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(
+                        text = state.statusMessage,
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Medium,
+                    )
+                    if (state.moveHistorySan.isNotEmpty()) {
+                        val moveLine = state.moveHistorySan.chunked(2).mapIndexed { i, pair ->
+                            if (pair.size > 1) "${i + 1}. ${pair[0]} ${pair[1]}" else "${i + 1}. ${pair[0]}"
+                        }.joinToString("  ")
+                        Text(
+                            text = moveLine,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
                     }
                 }
             }
+        }
+
+        item {
+            FlowRow(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                FilterChip(
+                    selected = state.coachEnabled,
+                    onClick = { onToggleCoach(!state.coachEnabled) },
+                    label = { Text("Coach Explain") },
+                    leadingIcon = { Icon(Icons.Default.Analytics, contentDescription = null, modifier = Modifier.size(16.dp)) },
+                    modifier = Modifier.testTag("endgame_coach_toggle"),
+                )
+                FilterChip(
+                    selected = slideEnabled,
+                    onClick = { onToggleMoveAnimation(!slideEnabled) },
+                    label = { Text("Slide Anim") },
+                    leadingIcon = { Icon(Icons.Default.Animation, contentDescription = null, modifier = Modifier.size(16.dp)) },
+                    modifier = Modifier.testTag("endgame_slide_toggle"),
+                )
+                FilterChip(
+                    selected = state.showBestMoveArrow,
+                    onClick = onToggleBestArrow,
+                    label = { Text("Best Arrow") },
+                    leadingIcon = { Icon(Icons.Default.Lightbulb, contentDescription = null, modifier = Modifier.size(16.dp)) },
+                    modifier = Modifier.testTag("endgame_best_arrow_toggle"),
+                )
+            }
+        }
+
+        item {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                OutlinedButton(
+                    onClick = onUndo,
+                    enabled = state.canUndo && !state.isBotThinking,
+                    modifier = Modifier.weight(1f).testTag("endgame_undo_btn"),
+                ) {
+                    Icon(Icons.AutoMirrored.Filled.Undo, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text("Undo")
+                }
+                OutlinedButton(
+                    onClick = onReset,
+                    modifier = Modifier.weight(1f).testTag("endgame_reset_btn"),
+                ) {
+                    Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text("Reset")
+                }
+                FilledTonalButton(
+                    onClick = { onPracticeEndgame(state.boardState.toFen()) },
+                    modifier = Modifier.weight(1.2f).testTag("endgame_practice_full_btn"),
+                ) {
+                    Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text("Play Full")
+                }
+            }
+        }
+
+        item {
+            AnimatedVisibility(visible = state.coachEnabled) {
+                val report = state.coachReport
+                Card(
+                    modifier = Modifier.fillMaxWidth().testTag("endgame_coach_card"),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                ) {
+                    Column(
+                        modifier = Modifier.padding(14.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    "Endgame Coach Breakdown",
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.Bold,
+                                )
+                                Text(
+                                    report?.classificationTitle ?: state.exercise.category,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.primary,
+                                )
+                            }
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                Surface(
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = MaterialTheme.colorScheme.primaryContainer,
+                                ) {
+                                    Text(
+                                        text = report?.evalFormatted ?: "--",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                    )
+                                }
+                                TextButton(
+                                    onClick = onAnalyzeNow,
+                                    enabled = !state.isAnalyzing,
+                                    modifier = Modifier.testTag("endgame_analyze_now_btn"),
+                                ) {
+                                    if (state.isAnalyzing) {
+                                        CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp)
+                                    } else {
+                                        Text("Analyze")
+                                    }
+                                }
+                            }
+                        }
+
+                        if (report == null) {
+                            Text(
+                                if (state.isAnalyzing) "Analyzing endgame structure and best continuation..."
+                                else "Tap Analyze or play a move for Mistake, Weak Point, Advantage, and Tips breakdown.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        } else {
+                            HorizontalDivider()
+
+                            // 1. Mistake
+                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                ) {
+                                    val verdict = report.moveVerdict
+                                    Icon(
+                                        Icons.Default.ErrorOutline,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(18.dp),
+                                        tint = if (verdict?.isMistake == true) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+                                    )
+                                    Text(
+                                        "Mistake & Move Check",
+                                        style = MaterialTheme.typography.labelLarge,
+                                        fontWeight = FontWeight.Bold,
+                                    )
+                                    if (verdict != null) {
+                                        val badgeColor = when (verdict.quality) {
+                                            MoveQuality.BLUNDER, MoveQuality.MISTAKE -> MaterialTheme.colorScheme.errorContainer
+                                            MoveQuality.INACCURACY -> MaterialTheme.colorScheme.tertiaryContainer
+                                            else -> MaterialTheme.colorScheme.primaryContainer
+                                        }
+                                        Surface(shape = RoundedCornerShape(6.dp), color = badgeColor) {
+                                            val deltaStr = if (verdict.cpLoss > 0) " (-${String.format(java.util.Locale.US, "%.2f", verdict.cpLoss / 100.0)})" else ""
+                                            Text(
+                                                "${verdict.quality.label}: ${verdict.playedSan}$deltaStr",
+                                                style = MaterialTheme.typography.labelSmall,
+                                                fontWeight = FontWeight.SemiBold,
+                                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                            )
+                                        }
+                                    }
+                                }
+                                Text(report.mistakeExplanation, style = MaterialTheme.typography.bodySmall)
+                                if (report.moveVerdict?.isMistake == true) {
+                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        TextButton(onClick = onUndo, enabled = state.canUndo) {
+                                            Text("Undo Move")
+                                        }
+                                        if (!state.showBestMoveArrow) {
+                                            TextButton(onClick = onToggleBestArrow) {
+                                                Text("Show Best (${report.moveVerdict.bestSan})")
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            HorizontalDivider()
+
+                            // 2. Weak Point
+                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                ) {
+                                    Icon(
+                                        Icons.Default.Warning,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(18.dp),
+                                        tint = MaterialTheme.colorScheme.tertiary,
+                                    )
+                                    Text(
+                                        "Weak Points",
+                                        style = MaterialTheme.typography.labelLarge,
+                                        fontWeight = FontWeight.Bold,
+                                    )
+                                }
+                                report.weakPoints.forEach { wp ->
+                                    Text("• $wp", style = MaterialTheme.typography.bodySmall)
+                                }
+                            }
+
+                            HorizontalDivider()
+
+                            // 3. Advantage
+                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                ) {
+                                    Icon(
+                                        Icons.Default.TrendingUp,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(18.dp),
+                                        tint = MaterialTheme.colorScheme.primary,
+                                    )
+                                    Text(
+                                        "Advantage",
+                                        style = MaterialTheme.typography.labelLarge,
+                                        fontWeight = FontWeight.Bold,
+                                    )
+                                }
+                                Text(report.advantageSummary, style = MaterialTheme.typography.bodySmall)
+                            }
+
+                            HorizontalDivider()
+
+                            // 4. Tips
+                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                ) {
+                                    Icon(
+                                        Icons.Default.TipsAndUpdates,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(18.dp),
+                                        tint = MaterialTheme.colorScheme.secondary,
+                                    )
+                                    Text(
+                                        "Tips",
+                                        style = MaterialTheme.typography.labelLarge,
+                                        fontWeight = FontWeight.Bold,
+                                    )
+                                }
+                                report.tips.forEach { tip ->
+                                    Text("• $tip", style = MaterialTheme.typography.bodySmall)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            Spacer(Modifier.height(14.dp))
         }
     }
 }

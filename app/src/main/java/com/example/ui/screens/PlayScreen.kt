@@ -33,6 +33,7 @@ import androidx.compose.material.icons.automirrored.filled.NavigateNext
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.automirrored.filled.Undo
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Animation
 import androidx.compose.material.icons.filled.Cancel
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Description
@@ -165,6 +166,7 @@ fun PlayScreen(
     onStepLatestMove: () -> Unit = {},
     onExportLocalPgn: () -> String = { "" },
     onImportLocalPgn: (String) -> Boolean = { false },
+    onToggleMoveAnimation: (Boolean) -> Unit = {},
 ) {
     var selectedModeTab by remember(activeOnlineGame?.id) {
         mutableIntStateOf(if (activeOnlineGame != null) 1 else 0)
@@ -239,6 +241,7 @@ fun PlayScreen(
                 onStepLatestMove = onStepLatestMove,
                 onExportLocalPgn = onExportLocalPgn,
                 onImportLocalPgn = onImportLocalPgn,
+                onToggleMoveAnimation = onToggleMoveAnimation,
             )
         } else {
             OnlinePlayContent(
@@ -309,6 +312,7 @@ private fun LocalBoardContent(
     onStepLatestMove: () -> Unit,
     onExportLocalPgn: () -> String,
     onImportLocalPgn: (String) -> Boolean,
+    onToggleMoveAnimation: (Boolean) -> Unit,
 ) {
     var dismissResultBanner by remember(state.gameId) { mutableStateOf(false) }
     var showPgnDialog by remember { mutableStateOf(false) }
@@ -669,6 +673,17 @@ private fun LocalBoardContent(
                     modifier = Modifier.testTag("resign_btn"),
                 ) {
                     Icon(Icons.Default.Flag, contentDescription = "Resign")
+                }
+                val slideEnabled = settings.moveAnimation && !settings.reducedAnimations
+                IconButton(
+                    onClick = { onToggleMoveAnimation(!slideEnabled) },
+                    modifier = Modifier.testTag("play_slide_anim_btn"),
+                ) {
+                    Icon(
+                        Icons.Default.Animation,
+                        contentDescription = if (slideEnabled) "Disable piece slide animation" else "Enable piece slide animation",
+                        tint = if (slideEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
             }
         }

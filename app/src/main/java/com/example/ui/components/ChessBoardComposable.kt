@@ -1,6 +1,7 @@
 package com.example.ui.components
 
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
@@ -53,9 +54,103 @@ import com.example.chess.PieceColor
 import com.example.chess.PieceType
 import com.example.chess.Square
 import com.example.ui.theme.BoardThemeColors
+import kotlin.math.PI
 import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.sin
+
+private data class SlideTransition(
+    val positionKey: String,
+    val piece: Piece,
+    val from: Square,
+    val to: Square,
+    val capturedPiece: Piece? = null,
+    val capturedSquare: Square? = null,
+    val rookSlide: Triple<Piece, Square, Square>? = null,
+)
+
+private fun buildSlideTransition(
+    prevBoard: Array<Piece?>,
+    nextState: ChessBoardState,
+    positionKey: String,
+    lastMove: Move?,
+): SlideTransition? {
+    if (lastMove != null && lastMove.dropPieceType == null) {
+        val movedNow = nextState.pieceAt(lastMove.to)
+        val movedBefore = prevBoard[lastMove.from.index]
+        if (movedNow != null && movedBefore != null) {
+            var rookSlide: Triple<Piece, Square, Square>? = null
+            if (movedBefore.type == PieceType.KING) {
+                var rookFrom: Square? = null
+                var rookTo: Square? = null
+                for (i in 0..63) {
+                    val beforeP = prevBoard[i]
+                    val afterP = nextState.board[i]
+                    if (beforeP?.type == PieceType.ROOK && beforeP.color == movedBefore.color && afterP == null) {
+                        rookFrom = Square(i)
+                    } else if (afterP?.type == PieceType.ROOK && afterP.color == movedBefore.color && beforeP == null) {
+                        rookTo = Square(i)
+                    }
+                }
+                if (rookFrom != null && rookTo != null) {
+                    rookSlide = Triple(Piece(PieceType.ROOK, movedBefore.color), rookFrom, rookTo)
+                }
+            }
+
+            val capSquare = when {
+                lastMove.isEnPassant -> Square.of(lastMove.to.file, lastMove.from.rank)
+                rookSlide != null && lastMove.to == rookSlide.second -> null
+                prevBoard[lastMove.to.index] != null -> lastMove.to
+                else -> null
+            }
+            val capPiece = capSquare?.let { prevBoard[it.index] }
+
+            return SlideTransition(
+                positionKey = positionKey,
+                piece = movedNow,
+                from = lastMove.from,
+                to = lastMove.to,
+                capturedPiece = capPiece,
+                capturedSquare = capSquare,
+                rookSlide = rookSlide,
+            )
+        }
+    }
+
+    // Fallback: detect single-piece (or castling undo) delta when navigating backward or stepping without lastMove
+    val removed = mutableListOf<Pair<Square, Piece>>()
+    val added = mutableListOf<Pair<Square, Piece>>()
+    for (i in 0..63) {
+        val b = prevBoard[i]
+        val a = nextState.board[i]
+        if (b != a) {
+            if (b != null) removed.add(Square(i) to b)
+            if (a != null) added.add(Square(i) to a)
+        }
+    }
+    if (removed.size == 1 && added.size == 1 && removed[0].second == added[0].second) {
+        return SlideTransition(
+            positionKey = positionKey,
+            piece = added[0].second,
+            from = removed[0].first,
+            to = added[0].first,
+        )
+    }
+    if (removed.size == 1 && added.size == 2) {
+        val movedPiece = removed[0].second
+        val dest = added.firstOrNull { it.second == movedPiece }
+        val restoredCapture = added.firstOrNull { it != dest }
+        if (dest != null && restoredCapture != null) {
+            return SlideTransition(
+                positionKey = positionKey,
+                piece = movedPiece,
+                from = removed[0].first,
+                to = dest.first,
+            )
+        }
+    }
+    return null
+}
 
 @Composable
 fun ChessBoardView(
@@ -87,19 +182,58 @@ fun ChessBoardView(
     onToggleCircleSquare: ((Square) -> Unit)? = null,
     onToggleUserArrow: ((Square, Square) -> Unit)? = null,
 ) {
-    var selectedSquare by remember(state.positionKey(), flipped) { mutableStateOf<Square?>(null) }
+    val currentPosKey = state.positionKey()
+    var selectedSquare by remember(currentPosKey, flipped) { mutableStateOf<Square?>(null) }
     var dragOrigin by remember { mutableStateOf<Square?>(null) }
     var dragPointerOffset by remember { mutableStateOf<Offset?>(null) }
+    var justDraggedMove by remember { mutableStateOf<Pair<Square, Square>?>(null) }
     var pendingPromotionMove by remember { mutableStateOf<Pair<Square, Square>?>(null) }
 
     val animProgress = remember { Animatable(1f) }
-    LaunchedEffect(lastMove, state.positionKey(), moveAnimation, reducedAnimations) {
-        if (lastMove != null && moveAnimation && !reducedAnimations) {
-            animProgress.snapTo(0f)
-            val durMs = (160f / animationSpeed.coerceIn(0.5f, 2.0f)).toInt().coerceIn(60, 320)
-            animProgress.animateTo(1f, tween(durationMillis = durMs))
+    var lastObservedPosKey by remember { mutableStateOf(currentPosKey) }
+    var lastObservedBoard by remember { mutableStateOf(state.board.copyOf()) }
+    var activeTransition by remember { mutableStateOf<SlideTransition?>(null) }
+    var animLaunchedKey by remember { mutableStateOf(currentPosKey) }
+
+    if (currentPosKey != lastObservedPosKey) {
+        val draggedPair = justDraggedMove
+        val wasDragged = draggedPair != null && lastMove != null &&
+            draggedPair.first == lastMove.from && draggedPair.second == lastMove.to
+        justDraggedMove = null
+
+        val computed = if (moveAnimation && !reducedAnimations && !wasDragged) {
+            buildSlideTransition(
+                prevBoard = lastObservedBoard,
+                nextState = state,
+                positionKey = currentPosKey,
+                lastMove = lastMove,
+            )
         } else {
+            null
+        }
+        activeTransition = computed
+        lastObservedPosKey = currentPosKey
+        lastObservedBoard = state.board.copyOf()
+        if (computed == null) {
+            animLaunchedKey = currentPosKey
+        }
+    }
+
+    LaunchedEffect(currentPosKey, moveAnimation, reducedAnimations) {
+        val transition = activeTransition
+        if (transition != null && transition.positionKey == currentPosKey && moveAnimation && !reducedAnimations) {
+            animProgress.snapTo(0f)
+            animLaunchedKey = currentPosKey
+            val durMs = (200f / animationSpeed.coerceIn(0.5f, 2.0f)).toInt().coerceIn(75, 420)
+            animProgress.animateTo(
+                targetValue = 1f,
+                animationSpec = tween(durationMillis = durMs, easing = FastOutSlowInEasing),
+            )
+            activeTransition = null
+        } else {
+            animLaunchedKey = currentPosKey
             animProgress.snapTo(1f)
+            activeTransition = null
         }
     }
 
@@ -256,6 +390,7 @@ fun ChessBoardView(
                                         if (annotationMode) {
                                             onToggleUserArrow?.invoke(from, dest)
                                         } else {
+                                            justDraggedMove = from to dest
                                             tryExecuteOrQueue(from, dest)
                                         }
                                     }
@@ -269,8 +404,15 @@ fun ChessBoardView(
                     },
             ) {
                 val cell = size.width / 8f
-                val progress = animProgress.value
-                val animLastMove = if (progress < 0.999f) lastMove else null
+                val transition = activeTransition?.takeIf {
+                    it.positionKey == currentPosKey && moveAnimation && !reducedAnimations
+                }
+                val effectiveProgress = when {
+                    transition == null -> 1f
+                    animLaunchedKey != currentPosKey -> 0f
+                    else -> animProgress.value.coerceIn(0f, 1f)
+                }
+                val activeSlide = if (effectiveProgress < 0.999f) transition else null
 
                 for (row in 0..7) {
                     for (col in 0..7) {
@@ -309,7 +451,22 @@ fun ChessBoardView(
 
                         val piece = state.pieceAt(sq)
                         val isBeingDragged = !annotationMode && dragOrigin == sq && dragPointerOffset != null
-                        val isAnimDest = animLastMove != null && animLastMove.to == sq
+                        val isAnimDest = activeSlide != null &&
+                            (activeSlide.to == sq || activeSlide.rookSlide?.third == sq)
+
+                        if (activeSlide?.capturedPiece != null && activeSlide.capturedSquare == sq) {
+                            val shrink = 1f - 0.25f * effectiveProgress
+                            val capSize = cell * shrink
+                            val pad = (cell - capSize) / 2f
+                            drawChessPiece(
+                                piece = activeSlide.capturedPiece,
+                                topLeft = Offset(topLeft.x + pad, topLeft.y + pad),
+                                cellSize = capSize,
+                                pieceStyleId = pieceStyleId,
+                                alpha = (1f - effectiveProgress).coerceIn(0f, 1f),
+                            )
+                        }
+
                         if (piece != null && !isBeingDragged && !isAnimDest) {
                             drawChessPiece(piece, topLeft, cell, pieceStyleId)
                         }
@@ -334,18 +491,28 @@ fun ChessBoardView(
                     }
                 }
 
-                // Draw smoothly sliding animated piece
-                if (animLastMove != null) {
-                    val destPiece = state.pieceAt(animLastMove.to)
-                    if (destPiece != null) {
-                        val startTl = squareTopLeft(animLastMove.from, cell)
-                        val endTl = squareTopLeft(animLastMove.to, cell)
-                        val curTl = Offset(
-                            startTl.x + (endTl.x - startTl.x) * progress,
-                            startTl.y + (endTl.y - startTl.y) * progress,
+                // Draw smoothly sliding animated piece(s) using Compose Animatable progress
+                if (activeSlide != null) {
+                    activeSlide.rookSlide?.let { (rookPiece, rookFrom, rookTo) ->
+                        val rStart = squareTopLeft(rookFrom, cell)
+                        val rEnd = squareTopLeft(rookTo, cell)
+                        val rCur = Offset(
+                            rStart.x + (rEnd.x - rStart.x) * effectiveProgress,
+                            rStart.y + (rEnd.y - rStart.y) * effectiveProgress,
                         )
-                        drawChessPiece(destPiece, curTl, cell, pieceStyleId)
+                        drawChessPiece(rookPiece, rCur, cell, pieceStyleId)
                     }
+
+                    val startTl = squareTopLeft(activeSlide.from, cell)
+                    val endTl = squareTopLeft(activeSlide.to, cell)
+                    val liftScale = 1f + 0.08f * sin(PI * effectiveProgress).toFloat()
+                    val liftedCell = cell * liftScale
+                    val liftOffset = (liftedCell - cell) / 2f
+                    val curTl = Offset(
+                        startTl.x + (endTl.x - startTl.x) * effectiveProgress - liftOffset,
+                        startTl.y + (endTl.y - startTl.y) * effectiveProgress - liftOffset,
+                    )
+                    drawChessPiece(activeSlide.piece, curTl, liftedCell, pieceStyleId)
                 }
 
                 // Draw arrows (engine best move, threats, user study annotations)
@@ -526,9 +693,10 @@ fun DrawScope.drawChessPiece(
     topLeft: Offset,
     cellSize: Float,
     pieceStyleId: String = "classic",
+    alpha: Float = 1f,
 ) {
     val isWhite = piece.color == PieceColor.WHITE
-    val (fill, stroke, detail) = when (pieceStyleId) {
+    val (baseFill, baseStroke, baseDetail) = when (pieceStyleId) {
         "modern" -> if (isWhite) Triple(Color(0xFFEAF2FF), Color(0xFF1E3A5F), Color(0xFF3B82F6))
         else Triple(Color(0xFF1E293B), Color(0xFFCBD5E1), Color(0xFF60A5FA))
         "minimal" -> if (isWhite) Triple(Color(0xFFFFFFFF), Color(0xFF334155), Color(0xFF64748B))
@@ -542,6 +710,10 @@ fun DrawScope.drawChessPiece(
         else -> if (isWhite) Triple(Color(0xFFFDFBF7), Color(0xFF1E293B), Color(0xFF334155))
         else Triple(Color(0xFF1A1F26), Color(0xFFE2E8F0), Color(0xFF94A3B8))
     }
+    val safeAlpha = alpha.coerceIn(0f, 1f)
+    val fill = baseFill.copy(alpha = baseFill.alpha * safeAlpha)
+    val stroke = baseStroke.copy(alpha = baseStroke.alpha * safeAlpha)
+    val detail = baseDetail.copy(alpha = baseDetail.alpha * safeAlpha)
 
     val swMult = when (pieceStyleId) {
         "high_contrast", "minimal" -> 0.062f
@@ -682,7 +854,7 @@ fun DrawScope.drawChessPiece(
     if (shadowOffset > 0f) {
         drawPass(
             tl = Offset(topLeft.x + shadowOffset, topLeft.y + shadowOffset),
-            passFill = Color(0x55000000),
+            passFill = Color(0x55000000).copy(alpha = 0.33f * safeAlpha),
             passStroke = Color.Transparent,
             passDetail = Color.Transparent,
             strokeOnly = true,

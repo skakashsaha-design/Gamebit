@@ -601,6 +601,24 @@ object PuzzlesAndLessonsCatalog {
             bestStartUci = "d3e4",
             tip = "Check on an open file while aligning diagonally with the opponent's rook to win it cleanly.",
         ),
+        EndgameExercise(
+            id = "eg_lucena_1",
+            category = "Rook Endgame",
+            title = "Lucena Position (Build the Bridge)",
+            objective = "Clear your king from e8 and shield against vertical rook checks with Rf4.",
+            fen = "4K3/2k1P3/8/8/8/8/8/r4R2 w - - 0 1",
+            bestStartUci = "f1f4",
+            tip = "Place your rook on the 4th rank (Rf4) so it can interpose once your king steps out and faces checks.",
+        ),
+        EndgameExercise(
+            id = "eg_philidor_1",
+            category = "Rook Endgame",
+            title = "Philidor Defense (6th Rank)",
+            objective = "Hold the draw as Black by anchoring your rook on the 6th rank before White advances.",
+            fen = "4k3/8/8/4K3/4P3/r7/8/7R b - - 0 1",
+            bestStartUci = "a3a6",
+            tip = "Keep your rook on the 6th rank until White pushes e5, then switch to checking from behind.",
+        ),
     )
 
     val OPENING_DRILLS: List<OpeningDrill> = listOf(

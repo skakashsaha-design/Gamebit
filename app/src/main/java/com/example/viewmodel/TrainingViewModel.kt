@@ -4,6 +4,10 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.audio.VoiceCoachManager
 import com.example.chess.ChessBoardState
+import com.example.chess.ChessEngine
+import com.example.chess.EndgameCoach
+import com.example.chess.EndgameCoachReport
+import com.example.chess.GameStatus
 import com.example.chess.Move
 import com.example.chess.MoveGenerator
 import com.example.chess.PieceColor
@@ -12,6 +16,7 @@ import com.example.data.local.AppSettings
 import com.example.data.local.ChessLesson
 import com.example.data.local.ChessPuzzleEntity
 import com.example.data.local.CustomPuzzleEntity
+import com.example.data.local.EndgameExercise
 import com.example.data.local.LessonProgressEntity
 import com.example.data.local.LocalChessRepository
 import com.example.data.local.OpeningDrill
@@ -82,6 +87,32 @@ data class CoordinateTrainerState(
     val lastResultCorrect: Boolean? = null,
 )
 
+data class EndgameTrainerState(
+    val exercise: EndgameExercise = PuzzlesAndLessonsCatalog.ENDGAMES.first(),
+    val boardState: ChessBoardState = ChessBoardState.fromFen(exercise.fen).getOrElse { ChessBoardState.standard() },
+    val legalMoves: List<Move> = MoveGenerator.legalMoves(boardState),
+    val humanColor: PieceColor = boardState.sideToMove,
+    val lastMove: Move? = null,
+    val moveHistorySan: List<String> = emptyList(),
+    val gameStatus: GameStatus = GameStatus.IN_PROGRESS,
+    val statusMessage: String = exercise.objective,
+    val coachEnabled: Boolean = true,
+    val showBestMoveArrow: Boolean = false,
+    val isAnalyzing: Boolean = false,
+    val isBotThinking: Boolean = false,
+    val canUndo: Boolean = false,
+    val coachReport: EndgameCoachReport? = null,
+)
+
+private data class EndgameUndoSnapshot(
+    val boardState: ChessBoardState,
+    val lastMove: Move?,
+    val moveHistorySan: List<String>,
+    val gameStatus: GameStatus,
+    val statusMessage: String,
+    val coachReport: EndgameCoachReport?,
+)
+
 class TrainingViewModel(
     private val localRepo: LocalChessRepository,
     private val settingsRepo: SettingsRepository,
@@ -97,6 +128,9 @@ class TrainingViewModel(
     private val _coordState = MutableStateFlow(CoordinateTrainerState())
     val coordState: StateFlow<CoordinateTrainerState> = _coordState.asStateFlow()
 
+    private val _endgameState = MutableStateFlow(EndgameTrainerState())
+    val endgameState: StateFlow<EndgameTrainerState> = _endgameState.asStateFlow()
+
     val puzzleCollection: StateFlow<List<ChessPuzzleEntity>> = localRepo.observePuzzleCollection()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
@@ -111,6 +145,8 @@ class TrainingViewModel(
 
     private var stormJob: Job? = null
     private var coordJob: Job? = null
+    private var endgameJob: Job? = null
+    private val endgameUndoStack = mutableListOf<EndgameUndoSnapshot>()
     private var puzzleStartMs = System.currentTimeMillis()
     private var currentSettings = AppSettings()
 
@@ -119,6 +155,7 @@ class TrainingViewModel(
             localRepo.seedBuiltInPuzzlesIfNeeded()
         }
         startOpeningDrill(PuzzlesAndLessonsCatalog.OPENING_DRILLS.first())
+        selectEndgameExercise(PuzzlesAndLessonsCatalog.ENDGAMES.first())
     }
 
     fun updateSettings(settings: AppSettings) {
@@ -468,6 +505,218 @@ class TrainingViewModel(
         }
     }
 
+    // --- Interactive Endgame Trainer ---
+    fun selectEndgameExercise(exercise: EndgameExercise) {
+        endgameJob?.cancel()
+        endgameUndoStack.clear()
+        val initial = ChessBoardState.fromFen(exercise.fen).getOrElse { ChessBoardState.standard() }
+        val legal = MoveGenerator.legalMoves(initial)
+        val coachOn = _endgameState.value.coachEnabled
+        _endgameState.value = EndgameTrainerState(
+            exercise = exercise,
+            boardState = initial,
+            legalMoves = legal,
+            humanColor = initial.sideToMove,
+            lastMove = null,
+            moveHistorySan = emptyList(),
+            gameStatus = GameStatus.IN_PROGRESS,
+            statusMessage = exercise.objective,
+            coachEnabled = coachOn,
+            showBestMoveArrow = false,
+            isAnalyzing = coachOn,
+            isBotThinking = false,
+            canUndo = false,
+            coachReport = null,
+        )
+        if (coachOn) {
+            analyzeEndgamePositionNow()
+        }
+    }
+
+    fun resetEndgameExercise() {
+        selectEndgameExercise(_endgameState.value.exercise)
+    }
+
+    fun toggleEndgameCoachEnabled(enabled: Boolean) {
+        _endgameState.update { it.copy(coachEnabled = enabled) }
+        if (enabled && _endgameState.value.coachReport == null) {
+            analyzeEndgamePositionNow()
+        }
+    }
+
+    fun toggleEndgameBestMoveArrow() {
+        _endgameState.update { it.copy(showBestMoveArrow = !it.showBestMoveArrow) }
+        if (_endgameState.value.showBestMoveArrow && _endgameState.value.coachReport == null) {
+            analyzeEndgamePositionNow()
+        }
+    }
+
+    fun analyzeEndgamePositionNow() {
+        val snapshot = _endgameState.value
+        endgameJob?.cancel()
+        endgameJob = viewModelScope.launch {
+            _endgameState.update { it.copy(isAnalyzing = true) }
+            val report = EndgameCoach.analyzePosition(
+                state = snapshot.boardState,
+                exercise = snapshot.exercise,
+                lowMemoryMode = currentSettings.lowMemoryMode,
+                searchDepth = currentSettings.engineDepth.coerceIn(2, 3),
+            )
+            _endgameState.update { curr ->
+                if (curr.boardState.positionKey() == snapshot.boardState.positionKey()) {
+                    curr.copy(coachReport = report, isAnalyzing = false)
+                } else {
+                    curr.copy(isAnalyzing = false)
+                }
+            }
+        }
+    }
+
+    fun undoEndgameMove() {
+        val prev = endgameUndoStack.removeLastOrNull() ?: return
+        endgameJob?.cancel()
+        _endgameState.update { curr ->
+            curr.copy(
+                boardState = prev.boardState,
+                legalMoves = MoveGenerator.legalMoves(prev.boardState),
+                lastMove = prev.lastMove,
+                moveHistorySan = prev.moveHistorySan,
+                gameStatus = prev.gameStatus,
+                statusMessage = prev.statusMessage,
+                coachReport = prev.coachReport,
+                isAnalyzing = false,
+                isBotThinking = false,
+                canUndo = endgameUndoStack.isNotEmpty(),
+            )
+        }
+    }
+
+    fun submitEndgameMove(move: Move) {
+        val curr = _endgameState.value
+        if (curr.gameStatus.isTerminal || curr.isBotThinking) return
+        if (curr.boardState.sideToMove != curr.humanColor) return
+
+        val legalBefore = curr.legalMoves
+        val legalMove = legalBefore.firstOrNull { it.uci == move.uci } ?: return
+        val beforeState = curr.boardState
+        val san = MoveGenerator.toSan(beforeState, legalMove, legalBefore)
+
+        endgameUndoStack.add(
+            EndgameUndoSnapshot(
+                boardState = beforeState,
+                lastMove = curr.lastMove,
+                moveHistorySan = curr.moveHistorySan,
+                gameStatus = curr.gameStatus,
+                statusMessage = curr.statusMessage,
+                coachReport = curr.coachReport,
+            ),
+        )
+
+        val afterUser = MoveGenerator.applyMoveUnchecked(beforeState, legalMove)
+        val (statusAfterUser, winnerAfterUser) = MoveGenerator.evaluateGameResult(afterUser)
+        val terminalMsgAfterUser = formatEndgameTerminalText(statusAfterUser, winnerAfterUser)
+        val updatedSanHistory = curr.moveHistorySan + san
+
+        _endgameState.update {
+            it.copy(
+                boardState = afterUser,
+                legalMoves = if (statusAfterUser.isTerminal) emptyList() else MoveGenerator.legalMoves(afterUser),
+                lastMove = legalMove,
+                moveHistorySan = updatedSanHistory,
+                gameStatus = statusAfterUser,
+                statusMessage = if (statusAfterUser.isTerminal) terminalMsgAfterUser else "Played $san",
+                isAnalyzing = curr.coachEnabled,
+                isBotThinking = !statusAfterUser.isTerminal,
+                canUndo = endgameUndoStack.isNotEmpty(),
+            )
+        }
+
+        endgameJob?.cancel()
+        endgameJob = viewModelScope.launch {
+            val report = if (_endgameState.value.coachEnabled) {
+                EndgameCoach.analyzeMove(
+                    stateBefore = beforeState,
+                    movePlayed = legalMove,
+                    stateAfter = afterUser,
+                    exercise = curr.exercise,
+                    lowMemoryMode = currentSettings.lowMemoryMode,
+                    searchDepth = currentSettings.engineDepth.coerceIn(2, 3),
+                )
+            } else null
+
+            _endgameState.update {
+                it.copy(
+                    coachReport = report ?: it.coachReport,
+                    isAnalyzing = false,
+                    statusMessage = when {
+                        statusAfterUser.isTerminal -> terminalMsgAfterUser
+                        report?.moveVerdict?.isMistake == true -> "${report.moveVerdict.quality.label}: ${report.moveVerdict.playedSan} (best ${report.moveVerdict.bestSan})"
+                        else -> "Good move $san — opponent thinking..."
+                    },
+                )
+            }
+
+            if (report?.moveVerdict?.isMistake == true) {
+                voiceCoach?.speakTrainer(report.mistakeExplanation, currentSettings)
+            }
+
+            if (statusAfterUser.isTerminal) {
+                _endgameState.update { it.copy(isBotThinking = false) }
+                return@launch
+            }
+
+            delay(260L)
+            val engine = ChessEngine(lowMemoryMode = currentSettings.lowMemoryMode)
+            val replyLine = engine.evaluateBest(afterUser, depth = currentSettings.engineDepth.coerceIn(2, 3), timeLimitMs = 600L)
+            val replyMove = replyLine?.pvMoves?.firstOrNull()
+                ?: MoveGenerator.legalMoves(afterUser).firstOrNull()
+
+            if (replyMove != null) {
+                val replySan = MoveGenerator.toSan(afterUser, replyMove, MoveGenerator.legalMoves(afterUser))
+                val afterReply = MoveGenerator.applyMoveUnchecked(afterUser, replyMove)
+                val (statusAfterReply, winnerAfterReply) = MoveGenerator.evaluateGameResult(afterReply)
+                val terminalMsgAfterReply = formatEndgameTerminalText(statusAfterReply, winnerAfterReply)
+
+                val refreshedReport = if (_endgameState.value.coachEnabled && !statusAfterReply.isTerminal) {
+                    val posAnalysis = EndgameCoach.analyzePosition(
+                        state = afterReply,
+                        exercise = curr.exercise,
+                        lowMemoryMode = currentSettings.lowMemoryMode,
+                        searchDepth = currentSettings.engineDepth.coerceIn(2, 3),
+                    )
+                    posAnalysis.copy(
+                        moveVerdict = report?.moveVerdict,
+                        mistakeExplanation = report?.mistakeExplanation ?: posAnalysis.mistakeExplanation,
+                    )
+                } else report
+
+                _endgameState.update {
+                    it.copy(
+                        boardState = afterReply,
+                        legalMoves = if (statusAfterReply.isTerminal) emptyList() else MoveGenerator.legalMoves(afterReply),
+                        lastMove = replyMove,
+                        moveHistorySan = updatedSanHistory + replySan,
+                        gameStatus = statusAfterReply,
+                        statusMessage = if (statusAfterReply.isTerminal) terminalMsgAfterReply else "Opponent played $replySan — your turn.",
+                        coachReport = refreshedReport ?: it.coachReport,
+                        isBotThinking = false,
+                    )
+                }
+            } else {
+                _endgameState.update { it.copy(isBotThinking = false) }
+            }
+        }
+    }
+
+    private fun formatEndgameTerminalText(status: GameStatus, winner: PieceColor?): String {
+        val side = when (winner) {
+            PieceColor.WHITE -> "White wins"
+            PieceColor.BLACK -> "Black wins"
+            null -> "Draw"
+        }
+        return "$side — ${status.description}"
+    }
+
     // --- Coordinate Trainer ---
     fun startCoordinateTrainer(flipped: Boolean) {
         coordJob?.cancel()
@@ -512,6 +761,7 @@ class TrainingViewModel(
         super.onCleared()
         stormJob?.cancel()
         coordJob?.cancel()
+        endgameJob?.cancel()
     }
 }
 

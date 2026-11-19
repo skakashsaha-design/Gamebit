@@ -58,6 +58,7 @@ import com.example.audio.VoiceCoachManager
 import com.example.auth.AuthSession
 import com.example.auth.AuthState
 import com.example.auth.HttpAuthRepository
+import com.example.chess.ChessBoardState
 import com.example.chess.ChessVariant
 import com.example.data.local.AppSettings
 import com.example.data.local.ChessHubDatabase
@@ -394,6 +395,7 @@ private fun ChessHubMainShell(
     val lessonProgress by trainingVm.lessonProgress.collectAsStateWithLifecycle()
     val drillState by trainingVm.drillState.collectAsStateWithLifecycle()
     val coordState by trainingVm.coordState.collectAsStateWithLifecycle()
+    val endgameState by trainingVm.endgameState.collectAsStateWithLifecycle()
 
     val savedGames by localRepo.observeGames().collectAsStateWithLifecycle(initialValue = emptyList())
     val studies by localRepo.observeStudies().collectAsStateWithLifecycle(initialValue = emptyList())
@@ -685,6 +687,14 @@ private fun ChessHubMainShell(
                             onStepLatestMove = { localGameVm.stepLatestMove() },
                             onExportLocalPgn = { localGameVm.exportCurrentPgn() },
                             onImportLocalPgn = { pgn -> localGameVm.importPgnIntoLocalGame(pgn) },
+                            onToggleMoveAnimation = { enabled ->
+                                scope.launch {
+                                    settingsRepo.setMoveAnimation(enabled)
+                                    if (enabled && settings.reducedAnimations) {
+                                        settingsRepo.setReducedAnimations(false)
+                                    }
+                                }
+                            },
                         )
                         2 -> LearnScreen(
                             settings = settings,
@@ -694,6 +704,7 @@ private fun ChessHubMainShell(
                             lessonProgress = lessonProgress,
                             drillState = drillState,
                             coordState = coordState,
+                            endgameState = endgameState,
                             onSelectPuzzleMode = { m, th -> trainingVm.selectPuzzleMode(m, th) },
                             onSelectTheme = { th -> trainingVm.selectThemeFilter(th) },
                             onSelectDifficultyBand = { band -> trainingVm.selectDifficultyBand(band) },
@@ -712,12 +723,29 @@ private fun ChessHubMainShell(
                             onSubmitDrillMove = { m -> trainingVm.submitDrillMove(m) },
                             onStartCoordTrainer = { fl -> trainingVm.startCoordinateTrainer(fl) },
                             onTapCoordSquare = { sq -> trainingVm.onCoordinateSquareTapped(sq) },
+                            onSelectEndgameExercise = { ex -> trainingVm.selectEndgameExercise(ex) },
+                            onSubmitEndgameMove = { m -> trainingVm.submitEndgameMove(m) },
+                            onUndoEndgameMove = { trainingVm.undoEndgameMove() },
+                            onResetEndgameExercise = { trainingVm.resetEndgameExercise() },
+                            onToggleEndgameCoach = { en -> trainingVm.toggleEndgameCoachEnabled(en) },
+                            onToggleEndgameBestArrow = { trainingVm.toggleEndgameBestMoveArrow() },
+                            onAnalyzeEndgameNow = { trainingVm.analyzeEndgamePositionNow() },
+                            onToggleMoveAnimation = { enabled ->
+                                scope.launch {
+                                    settingsRepo.setMoveAnimation(enabled)
+                                    if (enabled && settings.reducedAnimations) {
+                                        settingsRepo.setReducedAnimations(false)
+                                    }
+                                }
+                            },
                             onPracticeEndgameInPlay = { fen ->
+                                val parsedColor = ChessBoardState.fromFen(fen).getOrNull()?.sideToMove
+                                    ?: com.example.chess.PieceColor.WHITE
                                 localGameVm.startNewGame(
                                     mode = PlayMode.VS_BOT,
                                     variant = ChessVariant.STANDARD,
                                     timeControl = localGameState.timeControl,
-                                    humanColor = com.example.chess.PieceColor.WHITE,
+                                    humanColor = parsedColor,
                                     customInitialFen = fen,
                                 )
                                 selectedTab = 1
