@@ -84,7 +84,7 @@ jobs:
           keytool -list -keystore "$GITHUB_WORKSPACE/debug.keystore" -storepass android -alias androiddebugkey >/dev/null
 
       - name: Build Universal Debug APK (single APK, all ABIs)
-        run: gradle :app:assembleDebug --no-daemon -Dorg.gradle.workers.max=2 "-Dorg.gradle.jvmargs=-Xmx2560m -XX:MaxMetaspaceSize=768m -Dfile.encoding=UTF-8"
+        run: gradle :app:assembleDebug --no-daemon -Dorg.gradle.workers.max=2 "-Dorg.gradle.jvmargs=-Xmx3072m -XX:MaxMetaspaceSize=768m -Dfile.encoding=UTF-8"
 
       - name: Build Signed Universal Release APK (when release secrets exist)
         if: ${{ secrets.KEYSTORE_BASE64 != '' && secrets.STORE_PASSWORD != '' && secrets.KEY_PASSWORD != '' }}
@@ -97,7 +97,7 @@ jobs:
         run: |
           trap 'rm -f "$KEYSTORE_PATH"' EXIT
           printf '%s' "$KEYSTORE_BASE64" | tr -d '[:space:]' | base64 -d > "$KEYSTORE_PATH"
-          gradle :app:assembleRelease --no-daemon -Dorg.gradle.workers.max=2 "-Dorg.gradle.jvmargs=-Xmx2560m -XX:MaxMetaspaceSize=768m -Dfile.encoding=UTF-8"
+          gradle :app:assembleRelease --no-daemon -Dorg.gradle.workers.max=2 "-Dorg.gradle.jvmargs=-Xmx3072m -XX:MaxMetaspaceSize=768m -Dfile.encoding=UTF-8"
 
       - name: Package & Verify Universal APK Artifacts
         shell: bash
@@ -111,6 +111,15 @@ jobs:
 
           if [ -f app/build/outputs/apk/release/app-release.apk ]; then
             cp app/build/outputs/apk/release/app-release.apk dist/ChessHub-universal-release.apk
+          fi
+
+          SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          APKSIGNER="$SDK_ROOT/build-tools/36.0.0/apksigner"
+          if [ -x "$APKSIGNER" ]; then
+            for apk in dist/*.apk; do
+              echo "Verifying APK signature: $apk"
+              "$APKSIGNER" verify --verbose "$apk"
+            done
           fi
 
           ls -lh dist/
@@ -207,10 +216,10 @@ jobs:
           keytool -list -keystore "$GITHUB_WORKSPACE/debug.keystore" -storepass android -alias androiddebugkey >/dev/null
 
       - name: Run Unit and Robolectric Tests
-        run: gradle :app:testDebugUnitTest --no-daemon --stacktrace -Dorg.gradle.workers.max=2 "-Dorg.gradle.jvmargs=-Xmx2560m -XX:MaxMetaspaceSize=768m -Dfile.encoding=UTF-8"
+        run: gradle :app:testDebugUnitTest --no-daemon --stacktrace -Dorg.gradle.workers.max=2 "-Dorg.gradle.jvmargs=-Xmx3072m -XX:MaxMetaspaceSize=768m -Dfile.encoding=UTF-8"
 
       - name: Run Android Lint
-        run: gradle :app:lintDebug --no-daemon --stacktrace -Dorg.gradle.workers.max=2 "-Dorg.gradle.jvmargs=-Xmx2560m -XX:MaxMetaspaceSize=768m -Dfile.encoding=UTF-8"
+        run: gradle :app:lintDebug --no-daemon --stacktrace -Dorg.gradle.workers.max=2 "-Dorg.gradle.jvmargs=-Xmx3072m -XX:MaxMetaspaceSize=768m -Dfile.encoding=UTF-8"
 
       - name: Upload Test & Lint Reports
         if: always()
