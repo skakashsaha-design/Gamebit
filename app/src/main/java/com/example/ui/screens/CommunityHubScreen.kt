@@ -25,7 +25,6 @@ import androidx.compose.material.icons.filled.Newspaper
 import androidx.compose.material.icons.filled.Report
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -71,6 +70,7 @@ import com.example.data.remote.PublicProfileDoc
 import com.example.data.remote.TeamDoc
 import com.example.data.remote.TournamentDoc
 import com.example.data.remote.TournamentEntryDoc
+import com.example.ui.components.GamebitDialog
 import com.example.viewmodel.UiState
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -123,6 +123,7 @@ fun CommunityHubScreen(
     onLookupExternalPlayer: (String, String) -> Unit,
     onImportExternalPgn: (String) -> Unit,
     onSignOut: () -> Unit,
+    onDeleteAccount: () -> Unit = {},
     savedGames: List<LocalGameEntity> = emptyList(),
     onOpenSavedGame: (LocalGameEntity) -> Unit = {},
 ) {
@@ -140,7 +141,7 @@ fun CommunityHubScreen(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text("ChessHub Community", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+            Text("Gamebit Community", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
             Row(verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = onOpenNewsReader, modifier = Modifier.testTag("hub_news_btn")) {
                     Icon(Icons.Default.Newspaper, contentDescription = "Chess News")
@@ -227,6 +228,7 @@ fun CommunityHubScreen(
                 onLookupExternalPlayer = onLookupExternalPlayer,
                 onImportExternalPgn = onImportExternalPgn,
                 onSignOut = onSignOut,
+                onDeleteAccount = onDeleteAccount,
             )
             else -> AdminModerationTab(
                 reports = adminReports,
@@ -238,32 +240,31 @@ fun CommunityHubScreen(
     reportTarget?.let { (targetUid, targetName) ->
         var category by remember { mutableStateOf("Unsportsmanlike") }
         var details by remember { mutableStateOf("") }
-        AlertDialog(
+        GamebitDialog(
             onDismissRequest = { reportTarget = null },
-            title = { Text("Report $targetName") },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        listOf("Unsportsmanlike", "Fair Play", "Harassment", "Spam").forEach { cat ->
-                            FilterChip(selected = category == cat, onClick = { category = cat }, label = { Text(cat) })
-                        }
-                    }
-                    OutlinedTextField(
-                        value = details,
-                        onValueChange = { details = it },
-                        label = { Text("Details") },
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                }
-            },
-            confirmButton = {
+            title = "Report $targetName",
+            subtitle = "Moderation & Fair-Play Review",
+            actions = {
+                TextButton(onClick = { reportTarget = null }) { Text("Cancel") }
+                Spacer(Modifier.width(8.dp))
                 Button(onClick = {
                     onSubmitReport(targetUid, category, details.ifBlank { category })
                     reportTarget = null
                 }) { Text("Submit") }
             },
-            dismissButton = { TextButton(onClick = { reportTarget = null }) { Text("Cancel") } },
-        )
+        ) {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                listOf("Unsportsmanlike", "Fair Play", "Harassment", "Spam").forEach { cat ->
+                    FilterChip(selected = category == cat, onClick = { category = cat }, label = { Text(cat) })
+                }
+            }
+            OutlinedTextField(
+                value = details,
+                onValueChange = { details = it },
+                label = { Text("Details") },
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
     }
 }
 
@@ -276,7 +277,7 @@ private fun SignInRequiredNotice(title: String, onRequestSignIn: () -> Unit) {
         Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
             Text(
-                "Sign in to your ChessHub Online server account to access multiplayer tournaments, clubs, leaderboards, and messaging.",
+                "Sign in to your Gamebit Online server account to access multiplayer tournaments, clubs, leaderboards, and messaging.",
                 style = MaterialTheme.typography.bodySmall,
             )
             Button(onClick = onRequestSignIn) { Text("Connect Online Account") }
@@ -409,7 +410,7 @@ private fun ClubsTeamsTab(
                 OutlinedTextField(value = clubName, onValueChange = { clubName = it }, label = { Text("New Club Name") }, modifier = Modifier.weight(1f), singleLine = true)
                 Button(onClick = {
                     if (clubName.isNotBlank()) {
-                        onCreateClub(clubName.trim(), "ChessHub Club", countryIso)
+                        onCreateClub(clubName.trim(), "Gamebit Club", countryIso)
                         clubName = ""
                     }
                 }) { Text("Create") }
@@ -506,7 +507,7 @@ private fun WatchAndBroadcastsTab(
             }
         }
         if (isOnline && liveWatchState is UiState.Success && liveWatchState.data.isNotEmpty()) {
-            item { Text("Live ChessHub Games", style = MaterialTheme.typography.labelLarge) }
+            item { Text("Live Gamebit Games", style = MaterialTheme.typography.labelLarge) }
             items(liveWatchState.data, key = { it.id }) { g ->
                 Card(
                     modifier = Modifier.fillMaxWidth().clickable { onSpectateGame(g.id) },
@@ -593,7 +594,7 @@ private fun SocialAndLeaderboardTab(
                 OutlinedTextField(
                     value = playerQuery,
                     onValueChange = { playerQuery = it },
-                    label = { Text("Search ChessHub username") },
+                    label = { Text("Search Gamebit username") },
                     modifier = Modifier.weight(1f).testTag("player_search_input"),
                     singleLine = true,
                 )

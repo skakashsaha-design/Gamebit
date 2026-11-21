@@ -25,8 +25,8 @@ import androidx.compose.material.icons.filled.EmojiEvents
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Verified
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -44,6 +44,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -52,11 +53,15 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.BuildConfig
 import com.example.R
@@ -64,13 +69,21 @@ import com.example.chess.CountryCatalog
 import com.example.chess.Piece
 import com.example.chess.PieceColor
 import com.example.chess.PieceType
+import com.example.data.local.AnimationMode
 import com.example.data.local.AppSettings
 import com.example.data.local.LocalGameEntity
+import com.example.data.local.PerformanceMode
+import com.example.data.local.RatingCategoryStats
+import com.example.data.local.VoiceMode
 import com.example.data.remote.ExternalPlayerSummary
 import com.example.data.remote.PublicProfileDoc
+import com.example.ui.components.GamebitDialog
 import com.example.ui.components.PieceMiniIcon
+import com.example.ui.components.PlayerAvatarCatalog
+import com.example.ui.components.PlayerAvatarView
 import com.example.ui.theme.ChessBoardThemes
 import com.example.ui.theme.ChessPieceStyles
+import java.util.Locale
 import kotlin.math.roundToInt
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
@@ -89,6 +102,7 @@ fun ProfileAndLookupTab(
     onLookupExternalPlayer: (String, String) -> Unit,
     onImportExternalPgn: (String) -> Unit,
     onSignOut: () -> Unit,
+    onDeleteAccount: () -> Unit = {},
 ) {
     var username by remember(myProfile?.username, settings.localDisplayName) {
         mutableStateOf(myProfile?.username ?: settings.localDisplayName)
@@ -105,20 +119,12 @@ fun ProfileAndLookupTab(
     var publicVisible by remember(myProfile?.publicVisible) { mutableStateOf(myProfile?.publicVisible ?: true) }
     var showCountryPicker by remember { mutableStateOf(false) }
     var showFidePicker by remember { mutableStateOf(false) }
+    var showDeleteAccountDialog by remember { mutableStateOf(false) }
 
     var extPlatform by remember { mutableStateOf("Lichess") }
     var extUsername by remember { mutableStateOf("") }
 
-    val avatarOptions = listOf(
-        "king" to PieceType.KING,
-        "queen" to PieceType.QUEEN,
-        "rook" to PieceType.ROOK,
-        "bishop" to PieceType.BISHOP,
-        "knight" to PieceType.KNIGHT,
-        "pawn" to PieceType.PAWN,
-    )
-
-    val selectedAvatarType = avatarOptions.firstOrNull { it.first == settings.localAvatarId }?.second ?: PieceType.KNIGHT
+    val selectedAvatarOpt = PlayerAvatarCatalog.forId(settings.localAvatarId)
 
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(14.dp),
@@ -137,27 +143,19 @@ fun ProfileAndLookupTab(
                         horizontalArrangement = Arrangement.spacedBy(12.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Surface(
-                            modifier = Modifier.size(60.dp),
-                            shape = RoundedCornerShape(16.dp),
-                            color = MaterialTheme.colorScheme.surface,
-                            border = BorderStroke(2.dp, MaterialTheme.colorScheme.primary),
-                        ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                PieceMiniIcon(
-                                    piece = Piece(selectedAvatarType, PieceColor.WHITE),
-                                    modifier = Modifier.size(42.dp),
-                                    pieceStyleId = settings.pieceStyleId,
-                                )
-                            }
-                        }
+                        PlayerAvatarView(
+                            avatarId = selectedAvatarOpt.id,
+                            size = 64.dp,
+                            pieceStyleId = settings.pieceStyleId,
+                            cornerRadius = 16.dp,
+                        )
                         Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                             ) {
                                 Text(
-                                    text = username.ifBlank { "ChessHub Player" },
+                                    text = username.ifBlank { "Gamebit Player" },
                                     style = MaterialTheme.typography.titleLarge,
                                     fontWeight = FontWeight.Bold,
                                 )
@@ -214,21 +212,41 @@ fun ProfileAndLookupTab(
             ) {
                 Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("Edit Identity & Avatar", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                    Text("Choose Piece Avatar", style = MaterialTheme.typography.labelLarge)
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        avatarOptions.forEach { (id, type) ->
-                            val selected = settings.localAvatarId == id
+                    Text(
+                        "Choose Player Crest (${selectedAvatarOpt.label})",
+                        style = MaterialTheme.typography.labelLarge,
+                    )
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        PlayerAvatarCatalog.ALL.forEach { opt ->
+                            val selected = settings.localAvatarId == opt.id
                             Surface(
-                                modifier = Modifier.size(48.dp).clickable { onAvatarSelected(id) },
+                                modifier = Modifier
+                                    .minimumInteractiveComponentSize()
+                                    .clickable { onAvatarSelected(opt.id) }
+                                    .testTag("avatar_option_${opt.id}"),
                                 shape = RoundedCornerShape(12.dp),
-                                color = if (selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
-                                border = if (selected) BorderStroke(2.dp, MaterialTheme.colorScheme.primary) else null,
+                                color = if (selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+                                border = if (selected) BorderStroke(2.dp, Color(opt.accentHex)) else BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                             ) {
-                                Box(contentAlignment = Alignment.Center) {
-                                    PieceMiniIcon(
-                                        piece = Piece(type, PieceColor.WHITE),
-                                        modifier = Modifier.size(34.dp),
+                                Column(
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.spacedBy(3.dp),
+                                ) {
+                                    PlayerAvatarView(
+                                        avatarId = opt.id,
+                                        size = 42.dp,
                                         pieceStyleId = settings.pieceStyleId,
+                                        cornerRadius = 11.dp,
+                                    )
+                                    Text(
+                                        text = opt.label.substringBefore(' '),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
                                     )
                                 }
                             }
@@ -285,6 +303,13 @@ fun ProfileAndLookupTab(
                                 Text(stringResource(R.string.sign_out))
                             }
                         }
+                        OutlinedButton(
+                            onClick = { showDeleteAccountDialog = true },
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
+                            modifier = Modifier.fillMaxWidth().testTag("delete_account_btn"),
+                        ) {
+                            Text("Delete Online Account")
+                        }
                     } else {
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             FilledTonalButton(
@@ -300,7 +325,7 @@ fun ProfileAndLookupTab(
             }
         }
 
-        // Ratings & Win/Draw/Loss Breakdown
+        // Ratings & Performance Breakdown (Realistic [200..3200] stats + Sparkline trends)
         item {
             val gamesPlayed = (myProfile?.gamesPlayed ?: 0L).toInt()
             val wins = (myProfile?.wins ?: 0L).toInt()
@@ -310,38 +335,28 @@ fun ProfileAndLookupTab(
             val drawPct = if (gamesPlayed > 0) ((draws * 100f) / gamesPlayed).roundToInt() else 0
             val lossPct = if (gamesPlayed > 0) (100 - winPct - drawPct).coerceAtLeast(0) else 0
 
-            val bulletR = (myProfile?.bulletRating ?: 1500L).toInt()
-            val blitzR = (myProfile?.blitzRating ?: 1500L).toInt()
-            val rapidR = (myProfile?.rapidRating ?: 1500L).toInt()
-            val classicalR = (myProfile?.classicalRating ?: 1500L).toInt()
-            val puzzleR = settings.localPuzzleRating
+            val categories = listOf(
+                Triple("Bullet", settings.localBulletStats, myProfile?.bulletRating?.toInt()),
+                Triple("Blitz", settings.localBlitzStats, myProfile?.blitzRating?.toInt()),
+                Triple("Rapid", settings.localRapidStats, myProfile?.rapidRating?.toInt()),
+                Triple("Classical", settings.localClassicalStats, myProfile?.classicalRating?.toInt()),
+                Triple("Puzzle", settings.localPuzzleStats, null),
+            )
 
             Card(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth().testTag("profile_ratings_card"),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
             ) {
-                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text("Ratings & Performance", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
-                    Text(
-                        "Bullet $bulletR • Blitz $blitzR • Rapid $rapidR • Classical $classicalR • Puzzle $puzzleR",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.primary,
-                    )
-                    Canvas(modifier = Modifier.fillMaxWidth().height(54.dp)) {
-                        val bars = listOf(bulletR, blitzR, rapidR, classicalR, puzzleR)
-                        val maxR = (bars.maxOrNull() ?: 2000).coerceAtLeast(2000).toFloat()
-                        val w = size.width / (bars.size * 1.6f)
-                        val gap = (size.width - w * bars.size) / (bars.size + 1)
-                        bars.forEachIndexed { idx, r ->
-                            val frac = (r / maxR).coerceIn(0.15f, 1f)
-                            val bh = size.height * frac
-                            drawRect(
-                                color = if (idx == 4) Color(0xFFF59E0B) else Color(0xFF10B981),
-                                topLeft = Offset(gap + idx * (w + gap), size.height - bh),
-                                size = Size(w, bh),
-                            )
-                        }
+                    categories.forEach { (label, localStats, onlineRating) ->
+                        RatingCategoryRow(
+                            label = label,
+                            stats = localStats,
+                            onlineRating = onlineRating,
+                            isPuzzle = label == "Puzzle",
+                        )
                     }
                     if (gamesPlayed > 0) {
                         Text(
@@ -523,6 +538,95 @@ fun ProfileAndLookupTab(
             },
         )
     }
+
+    if (showDeleteAccountDialog) {
+        GamebitDialog(
+            onDismissRequest = { showDeleteAccountDialog = false },
+            title = "Delete Online Account?",
+            subtitle = "This permanently removes your Gamebit server profile and signs you out.",
+            actions = {
+                TextButton(onClick = { showDeleteAccountDialog = false }) { Text("Cancel") }
+                Spacer(Modifier.width(8.dp))
+                Button(
+                    onClick = {
+                        showDeleteAccountDialog = false
+                        onDeleteAccount()
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
+                    modifier = Modifier.testTag("confirm_delete_account_btn"),
+                ) { Text("Delete Account") }
+            },
+        ) {
+            Text(
+                "Your local Room archive, custom puzzles, studies, and offline ratings remain safely stored on this device.",
+                style = MaterialTheme.typography.bodySmall,
+            )
+        }
+    }
+}
+
+@Composable
+private fun RatingCategoryRow(
+    label: String,
+    stats: RatingCategoryStats,
+    onlineRating: Int?,
+    isPuzzle: Boolean,
+) {
+    val displayedRating = (onlineRating ?: stats.rating).coerceIn(200, 3200)
+    val peak = maxOf(stats.peakRating, displayedRating).coerceIn(200, 3200)
+    val deltaStr = when {
+        stats.lastDelta > 0 -> "+${stats.lastDelta}"
+        stats.lastDelta < 0 -> "${stats.lastDelta}"
+        else -> "0"
+    }
+    val deltaColor = when {
+        stats.lastDelta > 0 -> Color(0xFF10B981)
+        stats.lastDelta < 0 -> Color(0xFFEF4444)
+        else -> MaterialTheme.colorScheme.onSurfaceVariant
+    }
+    val lineColor = if (isPuzzle) Color(0xFFF59E0B) else Color(0xFF10B981)
+
+    Surface(
+        shape = RoundedCornerShape(10.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(label, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
+                Text(
+                    "Peak $peak • ${stats.gamesPlayed} games",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Canvas(modifier = Modifier.width(68.dp).height(24.dp)) {
+                val points = if (stats.history.size >= 2) stats.history else listOf(displayedRating, displayedRating)
+                val minP = (points.minOrNull() ?: 1200) - 20
+                val maxP = (points.maxOrNull() ?: 1200) + 20
+                val span = (maxP - minP).coerceAtLeast(40).toFloat()
+                val path = Path()
+                points.forEachIndexed { idx, v ->
+                    val x = (idx.toFloat() / (points.size - 1)) * size.width
+                    val y = size.height - ((v - minP) / span) * size.height
+                    if (idx == 0) path.moveTo(x, y) else path.lineTo(x, y)
+                }
+                drawPath(
+                    path = path,
+                    color = lineColor,
+                    style = Stroke(width = 3f, cap = StrokeCap.Round, join = StrokeJoin.Round),
+                )
+            }
+            Column(horizontalAlignment = Alignment.End) {
+                Text("$displayedRating", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.ExtraBold)
+                Text(deltaStr, style = MaterialTheme.typography.labelSmall, color = deltaColor, fontWeight = FontWeight.Bold)
+            }
+        }
+    }
 }
 
 @Composable
@@ -558,28 +662,27 @@ private fun SearchableCountryDialog(
             query.isBlank() || it.name.contains(query, true) || it.isoCode.contains(query, true)
         }
     }
-    AlertDialog(
+    GamebitDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Select Country") },
-        text = {
-            Column(modifier = Modifier.height(340.dp)) {
-                OutlinedTextField(value = query, onValueChange = { query = it }, label = { Text("Search country...") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-                Spacer(Modifier.height(8.dp))
-                LazyColumn {
-                    items(filtered, key = { it.isoCode }) { c ->
-                        Row(
-                            modifier = Modifier.fillMaxWidth().clickable { onSelect(c) }.padding(vertical = 8.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                        ) {
-                            Text("${c.flagEmoji} ${c.name}")
-                            Text(c.isoCode, style = MaterialTheme.typography.labelSmall)
-                        }
+        title = "Select Country",
+        actions = { TextButton(onClick = onDismiss) { Text("Close") } },
+    ) {
+        Column(modifier = Modifier.height(340.dp)) {
+            OutlinedTextField(value = query, onValueChange = { query = it }, label = { Text("Search country...") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+            Spacer(Modifier.height(8.dp))
+            LazyColumn {
+                items(filtered, key = { it.isoCode }) { c ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth().clickable { onSelect(c) }.padding(vertical = 8.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                    ) {
+                        Text("${c.flagEmoji} ${c.name}")
+                        Text(c.isoCode, style = MaterialTheme.typography.labelSmall)
                     }
                 }
             }
-        },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } },
-    )
+        }
+    }
 }
 
 @Composable
@@ -591,25 +694,24 @@ private fun SearchableFideDialog(
     val filtered = remember(query) {
         CountryCatalog.FIDE_FEDERATIONS.filter { query.isBlank() || it.contains(query, true) }
     }
-    AlertDialog(
+    GamebitDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Select FIDE Federation") },
-        text = {
-            Column(modifier = Modifier.height(320.dp)) {
-                OutlinedTextField(value = query, onValueChange = { query = it }, label = { Text("Search FIDE code (e.g., BAN, FID, ENG)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-                Spacer(Modifier.height(8.dp))
-                LazyColumn {
-                    items(filtered, key = { it }) { code ->
-                        Text(
-                            text = code,
-                            modifier = Modifier.fillMaxWidth().clickable { onSelect(code) }.padding(vertical = 10.dp),
-                        )
-                    }
+        title = "Select FIDE Federation",
+        actions = { TextButton(onClick = onDismiss) { Text("Close") } },
+    ) {
+        Column(modifier = Modifier.height(320.dp)) {
+            OutlinedTextField(value = query, onValueChange = { query = it }, label = { Text("Search FIDE code (e.g., BAN, FID, ENG)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+            Spacer(Modifier.height(8.dp))
+            LazyColumn {
+                items(filtered, key = { it }) { code ->
+                    Text(
+                        text = code,
+                        modifier = Modifier.fillMaxWidth().clickable { onSelect(code) }.padding(vertical = 10.dp),
+                    )
                 }
             }
-        },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } },
-    )
+        }
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
@@ -661,6 +763,11 @@ fun SettingsAndAboutScreen(
     onFontScaleChange: (Float) -> Unit,
     onLanguageChange: (String) -> Unit,
     onClearNewsCache: () -> Unit,
+    onAnimationModeChange: (AnimationMode) -> Unit = {},
+    onPerformanceModeChange: (PerformanceMode) -> Unit = {},
+    onVoiceModeChange: (VoiceMode) -> Unit = {},
+    onVoiceSpeedChange: (Float) -> Unit = {},
+    onMoveFeedbackChange: (Boolean) -> Unit = {},
 ) {
     var showLicensesDialog by remember { mutableStateOf(false) }
 
@@ -733,9 +840,23 @@ fun SettingsAndAboutScreen(
             item { SettingSwitchRow("Piece Slide Move Animation", settings.moveAnimation, onMoveAnimationChange) }
             item { SettingSwitchRow("Reduced Animations (Accessibility)", settings.reducedAnimations, onReducedAnimationsChange) }
             item {
-                Text("Animation Speed: ${String.format("%.1fx", settings.animationSpeed)}")
+                Text("Animation Mode", style = MaterialTheme.typography.labelLarge)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    AnimationMode.entries.forEach { mode ->
+                        FilterChip(
+                            selected = settings.animationMode == mode,
+                            onClick = { onAnimationModeChange(mode) },
+                            label = { Text(mode.label) },
+                            modifier = Modifier.testTag("anim_mode_${mode.name.lowercase()}"),
+                        )
+                    }
+                }
+            }
+            item {
+                Text("Animation Speed: ${String.format(Locale.US, "%.1fx", settings.animationSpeed)}")
                 Slider(value = settings.animationSpeed, onValueChange = onAnimationSpeedChange, valueRange = 0.5f..2.0f)
             }
+            item { SettingSwitchRow("Live Move Quality Feedback", settings.moveFeedbackEnabled, onMoveFeedbackChange) }
             item { SettingSwitchRow("Auto-Queen on Promotion", settings.autoQueen, onAutoQueenChange) }
             item { SettingSwitchRow("Confirm Moves Before Sending", settings.confirmMoves, onConfirmMoveChange) }
             item { SettingSwitchRow("Enable Premoves", settings.premoveEnabled, onPremoveChange) }
@@ -796,11 +917,28 @@ fun SettingsAndAboutScreen(
                 }
             }
             item { SettingSwitchRow("Haptic Vibration Feedback", settings.hapticsEnabled, onHapticsChange) }
+            item {
+                Text("Voice Coaching Mode", style = MaterialTheme.typography.labelLarge)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    VoiceMode.entries.forEach { vm ->
+                        FilterChip(
+                            selected = settings.voiceMode == vm,
+                            onClick = { onVoiceModeChange(vm) },
+                            label = { Text(vm.label) },
+                            modifier = Modifier.testTag("voice_mode_${vm.name.lowercase()}"),
+                        )
+                    }
+                }
+            }
             item { SettingSwitchRow("Bot Personality Voice (TTS)", settings.botVoiceEnabled, onBotVoiceChange) }
             item { SettingSwitchRow("Coach / Trainer Hint Voice (TTS)", settings.trainerVoiceEnabled, onTrainerVoiceChange) }
             item {
                 Text("Voice Volume: ${(settings.voiceVolume * 100).toInt()}%")
                 Slider(value = settings.voiceVolume, onValueChange = onVoiceVolumeChange, valueRange = 0f..1f)
+            }
+            item {
+                Text("Voice Speed: ${String.format(Locale.US, "%.2fx", settings.voiceSpeed)}")
+                Slider(value = settings.voiceSpeed, onValueChange = onVoiceSpeedChange, valueRange = 0.75f..1.50f)
             }
             item { SettingSwitchRow("Ambient Focus Music", settings.musicEnabled, onMusicEnabledChange) }
             item {
@@ -824,6 +962,24 @@ fun SettingsAndAboutScreen(
             item { SettingSwitchRow("Allow Online Game Chat", settings.allowChatInGames, onAllowChatChange) }
             item { SettingSwitchRow("Show Community Social Feed", settings.showSocialFeed, onSocialFeedChange) }
             item { SettingSwitchRow("Event & Challenge Notifications", settings.notificationsEnabled, onNotificationsChange) }
+            item {
+                Text("Performance Preset", style = MaterialTheme.typography.labelLarge)
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    PerformanceMode.entries.forEach { pm ->
+                        FilterChip(
+                            selected = settings.performanceMode == pm,
+                            onClick = { onPerformanceModeChange(pm) },
+                            label = { Text(pm.label) },
+                            modifier = Modifier.testTag("perf_mode_${pm.name.lowercase()}"),
+                        )
+                    }
+                }
+                Text(
+                    text = settings.performanceMode.description,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
             item { SettingSwitchRow("Low-Memory Audio Mode", settings.lowMemoryAudioMode, onLowMemAudioChange) }
             item {
                 SettingSwitchRow(
@@ -844,15 +1000,15 @@ fun SettingsAndAboutScreen(
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
                 ) {
                     Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Text("About ChessHub", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                        Text("About Gamebit", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                         Text("Version ${BuildConfig.VERSION_NAME} (Build ${BuildConfig.VERSION_CODE})", style = MaterialTheme.typography.bodySmall)
                         Text("Package: ${BuildConfig.APPLICATION_ID}", style = MaterialTheme.typography.bodySmall)
                         Text(
-                            "ChessHub combines pure-Kotlin offline chess intelligence (ChessHub Kotlin UCI Engine 2.0, 9 variants, 18 bots, Mistake Breakdown, Puzzles & Opening Drills) with modular REST + WebSocket online play and read-only Lichess & Chess.com public endpoints.",
+                            "Gamebit combines pure-Kotlin offline chess intelligence (ChessHub Kotlin UCI Engine 2.0, 9 variants, 18 bots, Mistake Breakdown, Puzzles & Opening Drills) with modular REST + WebSocket online play and read-only Lichess & Chess.com public endpoints.",
                             style = MaterialTheme.typography.bodySmall,
                         )
                         Text(
-                            "Privacy & Permissions: Zero broad storage permissions. Device music uses Android Storage Access Framework (ACTION_OPEN_DOCUMENT). Games, puzzles, and preferences stay private locally unless signed in to a ChessHub server.",
+                            "Privacy & Permissions: Zero broad storage permissions. Device music uses Android Storage Access Framework (ACTION_OPEN_DOCUMENT). Games, puzzles, and preferences stay private locally unless signed in to a Gamebit server.",
                             style = MaterialTheme.typography.bodySmall,
                         )
                         Text(stringResource(R.string.independent_notice), style = MaterialTheme.typography.bodySmall)
@@ -867,21 +1023,20 @@ fun SettingsAndAboutScreen(
     }
 
     if (showLicensesDialog) {
-        AlertDialog(
+        GamebitDialog(
             onDismissRequest = { showLicensesDialog = false },
-            title = { Text("Open Source Licenses") },
-            text = {
-                Text(
-                    "• AndroidX, Jetpack Compose, Room, DataStore, Navigation: Apache License 2.0\n" +
-                        "• Retrofit, OkHttp (HTTPS + WebSocket) & Moshi: Apache License 2.0\n" +
-                        "• Fonts (Space Grotesk, Plus Jakarta Sans, JetBrains Mono): SIL Open Font License 1.1\n" +
-                        "• ChessHub Kotlin UCI Engine 2.0: Original pure-Kotlin Alpha-Beta / Quiescence / Multi-PV implementation.\n" +
-                        "• External APIs: Official read-only Lichess & Chess.com public endpoints & Lichess Atom News feed.",
-                    style = MaterialTheme.typography.bodySmall,
-                )
-            },
-            confirmButton = { TextButton(onClick = { showLicensesDialog = false }) { Text("Close") } },
-        )
+            title = "Open Source Licenses",
+            actions = { TextButton(onClick = { showLicensesDialog = false }) { Text("Close") } },
+        ) {
+            Text(
+                "• AndroidX, Jetpack Compose, Room, DataStore, Navigation: Apache License 2.0\n" +
+                    "• Retrofit, OkHttp (HTTPS + WebSocket) & Moshi: Apache License 2.0\n" +
+                    "• Fonts (Space Grotesk, Plus Jakarta Sans, JetBrains Mono): SIL Open Font License 1.1\n" +
+                    "• ChessHub Kotlin UCI Engine 2.0: Original pure-Kotlin Alpha-Beta / Quiescence / Multi-PV implementation.\n" +
+                    "• External APIs: Official read-only Lichess & Chess.com public endpoints & Lichess Atom News feed.",
+                style = MaterialTheme.typography.bodySmall,
+            )
+        }
     }
 }
 

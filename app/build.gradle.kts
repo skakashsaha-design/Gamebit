@@ -13,8 +13,8 @@ android {
     applicationId = "com.aistudio.chesshub.qmrtxk"
     minSdk = 24
     targetSdk = 36
-    versionCode = 1
-    versionName = "2.0.0"
+    versionCode = providers.gradleProperty("appVersionCode").map { it.toInt() }.getOrElse(1)
+    versionName = providers.gradleProperty("appVersionName").getOrElse("2.0.0")
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
@@ -60,7 +60,18 @@ android {
     compose = true
     buildConfig = true
   }
-  testOptions { unitTests { isIncludeAndroidResources = true } }
+  testOptions {
+    unitTests {
+      isIncludeAndroidResources = true
+      all {
+        it.jvmArgs(
+          "--add-opens=java.base/jdk.internal.access=ALL-UNNAMED",
+          "--add-opens=java.base/java.io=ALL-UNNAMED",
+          "--add-opens=java.base/java.lang=ALL-UNNAMED",
+        )
+      }
+    }
+  }
   dependenciesInfo {
     includeInApk = false
     includeInBundle = true

@@ -61,6 +61,7 @@ data class PuzzleSessionState(
     val solved: Boolean = false,
     val failed: Boolean = false,
     val showHint: Boolean = false,
+    val showSolution: Boolean = false,
     val streakCount: Int = 0,
     val stormScore: Int = 0,
     val stormRemainingSec: Int = 180,
@@ -263,6 +264,26 @@ class TrainingViewModel(
         voiceCoach?.speakTrainer(hint, currentSettings)
     }
 
+    fun revealPuzzleSolution() {
+        val curr = _puzzleState.value
+        val remainingUci = curr.currentPuzzle.solutionUci.drop(curr.solutionIndex)
+        var st = curr.boardState
+        val sanParts = mutableListOf<String>()
+        for (uci in remainingUci) {
+            val legal = MoveGenerator.legalMoves(st)
+            val m = legal.firstOrNull { it.uci == uci || (uci.length == 4 && it.uci.startsWith(uci)) }
+            if (m != null) {
+                sanParts.add(MoveGenerator.toSan(st, m, legal))
+                st = MoveGenerator.applyMoveUnchecked(st, m)
+            } else {
+                sanParts.add(uci)
+            }
+        }
+        val solText = if (sanParts.isEmpty()) "Puzzle complete." else "Solution: ${sanParts.joinToString(" • ")}"
+        _puzzleState.update { it.copy(showSolution = true, showHint = true, feedbackText = solText) }
+        voiceCoach?.speakTrainer(solText, currentSettings)
+    }
+
     fun toggleBookmarkCurrentPuzzle() {
         val id = _puzzleState.value.currentPuzzle.id
         val next = !_puzzleState.value.isCurrentBookmarked
@@ -292,7 +313,7 @@ class TrainingViewModel(
                 difficultyRating = rating.coerceIn(400, 3000),
                 themes = theme.trim().ifBlank { "Custom" },
                 hint = hint.trim().ifBlank { "Calculate forcing checks and captures first." },
-                explanation = explanation.trim().ifBlank { "User-created ChessHub puzzle." },
+                explanation = explanation.trim().ifBlank { "User-created Gamebit puzzle." },
                 source = "custom",
             )
             localRepo.savePuzzle(entity)

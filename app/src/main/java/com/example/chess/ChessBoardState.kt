@@ -40,7 +40,8 @@ data class ChessBoardState(
         }
         sb.append(' ').append(sideToMove.fenChar)
         sb.append(' ').append(castlingRights.toFenString(variant == ChessVariant.CHESS960))
-        sb.append(' ').append(enPassantSquare?.algebraic ?: "-")
+        val legalEp = if (enPassantSquare != null && MoveGenerator.hasLegalEnPassantCapture(this)) enPassantSquare.algebraic else "-"
+        sb.append(' ').append(legalEp)
         if (variant == ChessVariant.THREE_CHECK) {
             sb.append(" +${3 - blackChecksRemaining}+${3 - whiteChecksRemaining}")
         }

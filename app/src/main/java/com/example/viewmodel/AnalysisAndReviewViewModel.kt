@@ -57,6 +57,7 @@ data class AnalysisUiState(
     val coachInsight: String = "",
     val isAutoPlaying: Boolean = false,
     val autoplaySpeedMs: Long = 900L,
+    val autoplayMultiplier: Float = 1.0f,
     val reviewReport: GameReviewReport? = null,
     val isReviewing: Boolean = false,
     val statusBanner: String = "",
@@ -240,6 +241,26 @@ class AnalysisAndReviewViewModel(
         }
     }
 
+    fun setAutoplaySpeed(multiplier: Float) {
+        val clamped = when {
+            multiplier <= 0.6f -> 0.5f
+            multiplier >= 1.8f -> 2.0f
+            else -> 1.0f
+        }
+        val speedMs = when (clamped) {
+            0.5f -> 1800L
+            2.0f -> 450L
+            else -> 900L
+        }
+        val wasPlaying = _uiState.value.isAutoPlaying
+        _uiState.update { it.copy(autoplayMultiplier = clamped, autoplaySpeedMs = speedMs) }
+        if (wasPlaying) {
+            autoplayJob?.cancel()
+            _uiState.update { it.copy(isAutoPlaying = false) }
+            toggleAutoplay()
+        }
+    }
+
     fun toggleAutoplay() {
         if (_uiState.value.isAutoPlaying) {
             autoplayJob?.cancel()
@@ -333,7 +354,7 @@ class AnalysisAndReviewViewModel(
 
     fun exportPgn(): String = PgnParser.exportPgn(
         root = _uiState.value.rootNode,
-        headers = mapOf("Event" to "ChessHub Analysis", "FEN" to _uiState.value.rootNode.state.toFen()),
+        headers = mapOf("Event" to "Gamebit Analysis", "FEN" to _uiState.value.rootNode.state.toFen()),
         result = "*",
     )
 

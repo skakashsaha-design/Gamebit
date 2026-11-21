@@ -32,6 +32,7 @@ import androidx.compose.material.icons.automirrored.filled.NavigateBefore
 import androidx.compose.material.icons.automirrored.filled.NavigateNext
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.automirrored.filled.Undo
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Animation
 import androidx.compose.material.icons.filled.Cancel
@@ -42,6 +43,7 @@ import androidx.compose.material.icons.filled.Flag
 import androidx.compose.material.icons.filled.FlipCameraAndroid
 import androidx.compose.material.icons.filled.Handshake
 import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.Insights
 import androidx.compose.material.icons.filled.LastPage
 import androidx.compose.material.icons.filled.Lightbulb
 import androidx.compose.material.icons.filled.Pause
@@ -50,7 +52,6 @@ import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material.icons.filled.Tune
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -91,6 +92,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.chess.AiDifficulty
 import com.example.chess.BoardArrow
@@ -103,18 +105,27 @@ import com.example.chess.Glicko2RatingSystem
 import com.example.chess.GlickoRating
 import com.example.chess.Move
 import com.example.chess.MoveGenerator
+import com.example.chess.MoveQuality
 import com.example.chess.Piece
 import com.example.chess.PieceColor
 import com.example.chess.PieceType
+import com.example.chess.ReviewedMove
 import com.example.chess.TimeControl
+import com.example.data.local.AnimationMode
 import com.example.data.local.AppSettings
 import com.example.data.remote.GameChatMessageDoc
 import com.example.data.remote.OnlineGameDoc
 import com.example.data.remote.PublicProfileDoc
 import com.example.data.remote.RatingDeltaResult
 import com.example.data.remote.WebSocketConnectionState
+import com.example.ui.components.BotAvatarView
 import com.example.ui.components.ChessBoardView
+import com.example.ui.components.GamebitDialog
+import com.example.ui.components.MoveExplanationDialog
+import com.example.ui.components.MoveQualityBadge
 import com.example.ui.components.PieceMiniIcon
+import com.example.ui.components.PlayerAvatarView
+import com.example.ui.components.PostGameComparisonDialog
 import com.example.ui.theme.ChessBoardThemes
 import com.example.viewmodel.LocalGameUiState
 import com.example.viewmodel.PlayMode
@@ -167,6 +178,10 @@ fun PlayScreen(
     onExportLocalPgn: () -> String = { "" },
     onImportLocalPgn: (String) -> Boolean = { false },
     onToggleMoveAnimation: (Boolean) -> Unit = {},
+    onToggleRatedGame: (Boolean) -> Unit = {},
+    onToggleMoveFeedback: (Boolean) -> Unit = {},
+    onSaveGameSnapshot: () -> Unit = {},
+    onSpeakBotDialogue: () -> Unit = {},
 ) {
     var selectedModeTab by remember(activeOnlineGame?.id) {
         mutableIntStateOf(if (activeOnlineGame != null) 1 else 0)
@@ -242,6 +257,9 @@ fun PlayScreen(
                 onExportLocalPgn = onExportLocalPgn,
                 onImportLocalPgn = onImportLocalPgn,
                 onToggleMoveAnimation = onToggleMoveAnimation,
+                onToggleMoveFeedback = onToggleMoveFeedback,
+                onSaveGameSnapshot = onSaveGameSnapshot,
+                onSpeakBotDialogue = onSpeakBotDialogue,
             )
         } else {
             OnlinePlayContent(
@@ -273,8 +291,9 @@ fun PlayScreen(
         NewLocalGameBottomSheet(
             currentState = localState,
             onDismiss = { showSetupSheet = false },
-            onStart = { mode, variant, tc, color, bot, botBlack ->
+            onStart = { mode, variant, tc, color, bot, botBlack, rated ->
                 showSetupSheet = false
+                onToggleRatedGame(rated)
                 onStartNewLocalGame(mode, variant, tc, color, bot, botBlack)
             },
         )
@@ -313,9 +332,13 @@ private fun LocalBoardContent(
     onExportLocalPgn: () -> String,
     onImportLocalPgn: (String) -> Boolean,
     onToggleMoveAnimation: (Boolean) -> Unit,
+    onToggleMoveFeedback: (Boolean) -> Unit,
+    onSaveGameSnapshot: () -> Unit,
+    onSpeakBotDialogue: () -> Unit,
 ) {
     var dismissResultBanner by remember(state.gameId) { mutableStateOf(false) }
     var showPgnDialog by remember { mutableStateOf(false) }
+    var inspectedMove by remember { mutableStateOf<ReviewedMove?>(null) }
 
     val topColor = if (state.flipped) PieceColor.WHITE else PieceColor.BLACK
     val bottomColor = topColor.opposite
@@ -333,7 +356,7 @@ private fun LocalBoardContent(
             ) {
                 Column(modifier = Modifier.weight(1f)) {
                     val modeBadge = when (state.mode) {
-                        PlayMode.VS_BOT -> " • ${state.aiDifficulty.displayName} AI"
+                        PlayMode.VS_BOT -> " • ${state.aiDifficulty.displayName} AI" + if (state.ratedGame) " (Rated)" else " (Casual)"
                         PlayMode.BOT_VS_BOT -> " • Bot vs Bot"
                         PlayMode.PASS_AND_PLAY -> " • 2P OTB"
                     }
@@ -342,12 +365,20 @@ private fun LocalBoardContent(
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.SemiBold,
                     )
-                    val openText = state.openingMatch?.let { "${it.eco}: ${it.name}" } ?: "Ready"
-                    Text(
-                        text = if (state.isCurrentMoveBook) "Book: $openText" else openText,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+                    val openText = state.openingMatch?.let { "${it.name} (${it.eco})" } ?: "Ready"
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        if (state.isCurrentMoveBook) {
+                            MoveQualityBadge(quality = MoveQuality.BOOK, compact = true)
+                        }
+                        Text(
+                            text = openText,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                 }
                 FilledTonalButton(
                     onClick = onOpenSetup,
@@ -367,6 +398,8 @@ private fun LocalBoardContent(
                 subtitle = playerSubtitleFor(state, topColor),
                 side = topColor,
                 pieceStyleId = settings.pieceStyleId,
+                bot = botForColor(state, topColor),
+                playerAvatarId = if (botForColor(state, topColor) == null && (state.mode != PlayMode.PASS_AND_PLAY || topColor == PieceColor.WHITE)) settings.localAvatarId else null,
                 timeMs = if (topColor == PieceColor.WHITE) state.whiteTimeMs else state.blackTimeMs,
                 initialTimeMs = if (state.timeControl.clockType == ClockType.UNLIMITED) 0L else state.timeControl.initialSeconds * 1000L,
                 clockLabel = state.timeControl.label,
@@ -439,6 +472,7 @@ private fun LocalBoardContent(
                     pieceStyleId = settings.pieceStyleId,
                     moveAnimation = settings.moveAnimation,
                     reducedAnimations = settings.reducedAnimations,
+                    animationMode = settings.animationMode,
                     animationSpeed = settings.animationSpeed,
                     lastMove = state.displayedLastMove,
                     premoveQueue = if (state.isViewingLive) state.premoveQueue else emptyList(),
@@ -484,6 +518,8 @@ private fun LocalBoardContent(
                 subtitle = playerSubtitleFor(state, bottomColor),
                 side = bottomColor,
                 pieceStyleId = settings.pieceStyleId,
+                bot = botForColor(state, bottomColor),
+                playerAvatarId = if (botForColor(state, bottomColor) == null && (state.mode != PlayMode.PASS_AND_PLAY || bottomColor == PieceColor.WHITE)) settings.localAvatarId else null,
                 timeMs = if (bottomColor == PieceColor.WHITE) state.whiteTimeMs else state.blackTimeMs,
                 initialTimeMs = if (state.timeControl.clockType == ClockType.UNLIMITED) 0L else state.timeControl.initialSeconds * 1000L,
                 clockLabel = state.timeControl.label,
@@ -539,6 +575,55 @@ private fun LocalBoardContent(
             }
         }
 
+        if (settings.moveFeedbackEnabled && state.moveQualities.isNotEmpty()) {
+            val latestQuality = state.moveQualities.lastOrNull()
+            val latestSan = state.moveHistorySan.lastOrNull()
+            val latestExplanation = state.moveExplanations.lastOrNull().orEmpty()
+            val latestReviewed = state.reviewedMoves.lastOrNull()
+            if (latestQuality != null && latestSan != null) {
+                item {
+                    Surface(
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.72f),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth().testTag("live_move_feedback_banner"),
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Row(
+                                modifier = Modifier.weight(1f),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                MoveQualityBadge(quality = latestQuality, compact = true)
+                                Column {
+                                    Text(
+                                        text = "$latestSan • ${latestQuality.label}",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        fontWeight = FontWeight.Bold,
+                                    )
+                                    if (latestExplanation.isNotBlank()) {
+                                        Text(
+                                            text = latestExplanation,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                    }
+                                }
+                            }
+                            if (latestReviewed != null) {
+                                TextButton(onClick = { inspectedMove = latestReviewed }) {
+                                    Text("Why?")
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         if (state.coachMessage.isNotBlank()) {
             item {
                 Surface(
@@ -557,16 +642,65 @@ private fun LocalBoardContent(
 
         if (state.botDialogueText.isNotBlank() && state.mode != PlayMode.PASS_AND_PLAY) {
             item {
+                val speakerBot = if (state.mode == PlayMode.BOT_VS_BOT && state.moveHistorySan.isNotEmpty() && state.boardState.sideToMove == PieceColor.WHITE) {
+                    state.botBlack
+                } else {
+                    state.bot
+                }
                 Surface(
-                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.75f),
-                    shape = RoundedCornerShape(10.dp),
-                    modifier = Modifier.fillMaxWidth(),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.82f),
+                    shape = RoundedCornerShape(12.dp),
+                    border = BorderStroke(1.dp, Color(speakerBot.avatarSpec.accentHex).copy(alpha = 0.45f)),
+                    modifier = Modifier.fillMaxWidth().testTag("bot_dialogue_banner"),
                 ) {
-                    Text(
-                        text = "Bot: \"${state.botDialogueText}\"",
-                        style = MaterialTheme.typography.bodySmall,
-                        modifier = Modifier.padding(10.dp),
-                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        BotAvatarView(
+                            bot = speakerBot,
+                            size = 40.dp,
+                            pieceStyleId = settings.pieceStyleId,
+                        )
+                        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            ) {
+                                Text(
+                                    text = speakerBot.name,
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.Bold,
+                                )
+                                Surface(
+                                    shape = RoundedCornerShape(6.dp),
+                                    color = MaterialTheme.colorScheme.secondaryContainer,
+                                ) {
+                                    Text(
+                                        text = "${speakerBot.voiceProfile.voiceStyle.label} Voice",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSecondaryContainer,
+                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp),
+                                    )
+                                }
+                            }
+                            Text(
+                                text = "\"${state.botDialogueText}\"",
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                        }
+                        IconButton(
+                            onClick = onSpeakBotDialogue,
+                            modifier = Modifier.minimumInteractiveComponentSize().testTag("bot_speak_btn"),
+                        ) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.VolumeUp,
+                                contentDescription = "Speak bot dialogue",
+                                tint = MaterialTheme.colorScheme.primary,
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -674,7 +808,7 @@ private fun LocalBoardContent(
                 ) {
                     Icon(Icons.Default.Flag, contentDescription = "Resign")
                 }
-                val slideEnabled = settings.moveAnimation && !settings.reducedAnimations
+                val slideEnabled = settings.moveAnimation && !settings.reducedAnimations && settings.animationMode != AnimationMode.OFF
                 IconButton(
                     onClick = { onToggleMoveAnimation(!slideEnabled) },
                     modifier = Modifier.testTag("play_slide_anim_btn"),
@@ -685,10 +819,20 @@ private fun LocalBoardContent(
                         tint = if (slideEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
+                IconButton(
+                    onClick = { onToggleMoveFeedback(!settings.moveFeedbackEnabled) },
+                    modifier = Modifier.testTag("play_feedback_toggle_btn"),
+                ) {
+                    Icon(
+                        Icons.Default.Insights,
+                        contentDescription = if (settings.moveFeedbackEnabled) "Disable move feedback" else "Enable move feedback",
+                        tint = if (settings.moveFeedbackEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
         }
 
-        // Terminal Result Summary Card (appears cleanly below board, or dialog)
+        // Terminal Result Summary Card below board
         if (state.gameStatus.isTerminal) {
             item {
                 val winnerText = when (state.winner) {
@@ -706,15 +850,18 @@ private fun LocalBoardContent(
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold,
                         )
-                        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Button(onClick = onRematch, modifier = Modifier.testTag("rematch_btn")) {
+                        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Button(onClick = { dismissResultBanner = false }, modifier = Modifier.testTag("open_post_game_summary_btn")) {
+                                Text("Full Summary")
+                            }
+                            FilledTonalButton(onClick = onRematch, modifier = Modifier.testTag("inline_rematch_btn")) {
                                 Text("Rematch")
                             }
                             FilledTonalButton(
                                 onClick = {
                                     val fullPgn = onExportLocalPgn().ifBlank {
                                         buildString {
-                                            append("[Event \"ChessHub Game\"]\n")
+                                            append("[Event \"Gamebit Game\"]\n")
                                             append("[White \"${playerLabelFor(state, PieceColor.WHITE)}\"]\n")
                                             append("[Black \"${playerLabelFor(state, PieceColor.BLACK)}\"]\n\n")
                                             state.moveHistorySan.chunked(2).forEachIndexed { idx, pair ->
@@ -725,20 +872,20 @@ private fun LocalBoardContent(
                                     }
                                     onAnalyzePgn(fullPgn)
                                 },
-                                modifier = Modifier.testTag("review_game_btn"),
+                                modifier = Modifier.testTag("inline_review_game_btn"),
                             ) {
                                 Text("Review & Analyze")
                             }
                             OutlinedButton(
                                 onClick = { showPgnDialog = true },
-                                modifier = Modifier.testTag("result_pgn_btn"),
+                                modifier = Modifier.testTag("inline_result_pgn_btn"),
                             ) {
                                 Icon(Icons.Default.Description, contentDescription = null, modifier = Modifier.size(16.dp))
                                 Spacer(Modifier.width(4.dp))
                                 Text("PGN")
                             }
                             OutlinedButton(
-                                onClick = { onShareText("ChessHub FEN", state.displayedBoardState.toFen()) },
+                                onClick = { onShareText("Gamebit FEN", state.displayedBoardState.toFen()) },
                             ) {
                                 Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(16.dp))
                                 Spacer(Modifier.width(4.dp))
@@ -756,11 +903,15 @@ private fun LocalBoardContent(
                 moveHistorySan = state.moveHistorySan,
                 viewingPly = state.viewingPly,
                 isViewingLive = state.isViewingLive,
+                moveQualities = state.moveQualities,
+                reviewedMoves = state.reviewedMoves,
+                showFeedbackBadges = settings.moveFeedbackEnabled,
                 onJumpToPly = onJumpToPly,
                 onStepFirst = onStepFirstMove,
                 onStepPrev = onStepPreviousMove,
                 onStepNext = onStepNextMove,
                 onStepLatest = onStepLatestMove,
+                onInspectMove = { inspectedMove = it },
                 onOpenPgnSheet = { showPgnDialog = true },
             )
             Spacer(Modifier.height(14.dp))
@@ -768,24 +919,54 @@ private fun LocalBoardContent(
     }
 
     if (state.gameStatus.isTerminal && !dismissResultBanner) {
-        val headline = when (state.winner) {
-            PieceColor.WHITE -> "White Wins!"
-            PieceColor.BLACK -> "Black Wins!"
-            null -> "Game Drawn"
+        val fullPgn = onExportLocalPgn().ifBlank {
+            buildString {
+                append("[Event \"Gamebit Local Game\"]\n")
+                append("[White \"${playerLabelFor(state, PieceColor.WHITE)}\"]\n")
+                append("[Black \"${playerLabelFor(state, PieceColor.BLACK)}\"]\n\n")
+                state.moveHistorySan.chunked(2).forEachIndexed { idx, pair ->
+                    append("${idx + 1}. ${pair[0]} ")
+                    if (pair.size > 1) append("${pair[1]} ")
+                }
+            }
         }
-        AlertDialog(
-            onDismissRequest = { dismissResultBanner = true },
-            title = { Text(headline) },
-            text = { Text("${state.gameStatus.description} after ${state.moveHistorySan.size} plies.") },
-            confirmButton = {
-                Button(onClick = {
-                    dismissResultBanner = true
-                    onRematch()
-                }) { Text("Rematch") }
+        PostGameComparisonDialog(
+            gameStatus = state.gameStatus,
+            winner = state.winner,
+            whiteName = playerLabelFor(state, PieceColor.WHITE),
+            blackName = playerLabelFor(state, PieceColor.BLACK),
+            eloDelta = state.lastEloDelta,
+            report = state.postGameSummary,
+            reviewedMoves = state.reviewedMoves,
+            isGeneratingSummary = state.isGeneratingSummary,
+            reducedAnimations = settings.reducedAnimations || settings.lowMemoryMode || settings.animationMode != AnimationMode.FULL,
+            savedToArchive = state.savedToArchive,
+            onReviewGame = {
+                dismissResultBanner = true
+                onAnalyzePgn(fullPgn)
             },
-            dismissButton = {
-                TextButton(onClick = { dismissResultBanner = true }) { Text("View Board") }
+            onAnalyze = {
+                dismissResultBanner = true
+                onAnalyzePgn(fullPgn)
             },
+            onRematch = {
+                dismissResultBanner = true
+                onRematch()
+            },
+            onNewGame = {
+                dismissResultBanner = true
+                onOpenSetup()
+            },
+            onShareGame = { onShareText("Gamebit PGN", fullPgn) },
+            onSaveGame = onSaveGameSnapshot,
+            onDismiss = { dismissResultBanner = true },
+        )
+    }
+
+    inspectedMove?.let { rm ->
+        MoveExplanationDialog(
+            reviewedMove = rm,
+            onDismiss = { inspectedMove = null },
         )
     }
 
@@ -793,7 +974,7 @@ private fun LocalBoardContent(
         LocalPgnDialog(
             currentPgn = onExportLocalPgn().ifBlank {
                 buildString {
-                    append("[Event \"ChessHub Local Game\"]\n")
+                    append("[Event \"Gamebit Local Game\"]\n")
                     append("[White \"${playerLabelFor(state, PieceColor.WHITE)}\"]\n")
                     append("[Black \"${playerLabelFor(state, PieceColor.BLACK)}\"]\n\n")
                     state.moveHistorySan.chunked(2).forEachIndexed { idx, pair ->
@@ -803,7 +984,7 @@ private fun LocalBoardContent(
                 }
             },
             onDismiss = { showPgnDialog = false },
-            onSharePgn = { pgn -> onShareText("ChessHub PGN", pgn) },
+            onSharePgn = { pgn -> onShareText("Gamebit PGN", pgn) },
             onAnalyzePgn = { pgn ->
                 showPgnDialog = false
                 onAnalyzePgn(pgn)
@@ -822,15 +1003,22 @@ private fun MoveHistoryPanel(
     moveHistorySan: List<String>,
     viewingPly: Int,
     isViewingLive: Boolean,
+    moveQualities: List<MoveQuality?> = emptyList(),
+    reviewedMoves: List<ReviewedMove> = emptyList(),
+    showFeedbackBadges: Boolean = true,
     onJumpToPly: (Int) -> Unit,
     onStepFirst: () -> Unit,
     onStepPrev: () -> Unit,
     onStepNext: () -> Unit,
     onStepLatest: () -> Unit,
+    onInspectMove: (ReviewedMove) -> Unit = {},
     onOpenPgnSheet: () -> Unit,
 ) {
     val pairs = remember(moveHistorySan) { moveHistorySan.chunked(2) }
     val listState = rememberLazyListState()
+    val selectedReviewed = remember(reviewedMoves, viewingPly) {
+        reviewedMoves.firstOrNull { it.ply == viewingPly }
+    }
 
     LaunchedEffect(viewingPly, pairs.size) {
         if (pairs.isNotEmpty()) {
@@ -864,13 +1052,20 @@ private fun MoveHistoryPanel(
                         )
                     }
                 }
-                FilledTonalButton(
-                    onClick = onOpenPgnSheet,
-                    modifier = Modifier.height(36.dp).testTag("open_pgn_dialog_btn"),
-                ) {
-                    Icon(Icons.Default.Description, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(Modifier.width(4.dp))
-                    Text("PGN", style = MaterialTheme.typography.labelMedium)
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                    if (selectedReviewed != null) {
+                        TextButton(onClick = { onInspectMove(selectedReviewed) }) {
+                            Text("Why?")
+                        }
+                    }
+                    FilledTonalButton(
+                        onClick = onOpenPgnSheet,
+                        modifier = Modifier.height(36.dp).testTag("open_pgn_dialog_btn"),
+                    ) {
+                        Icon(Icons.Default.Description, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("PGN", style = MaterialTheme.typography.labelMedium)
+                    }
                 }
             }
 
@@ -903,6 +1098,10 @@ private fun MoveHistoryPanel(
                         val pair = pairs[rowIdx]
                         val whitePly = rowIdx * 2 + 1
                         val blackPly = rowIdx * 2 + 2
+                        val wQuality = if (showFeedbackBadges) moveQualities.getOrNull(whitePly - 1) else null
+                        val bQuality = if (showFeedbackBadges) moveQualities.getOrNull(blackPly - 1) else null
+                        val wReviewed = reviewedMoves.firstOrNull { it.ply == whitePly }
+                        val bReviewed = reviewedMoves.firstOrNull { it.ply == blackPly }
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -922,16 +1121,28 @@ private fun MoveHistoryPanel(
                             )
                             MoveHistoryPlyPill(
                                 san = pair[0],
+                                quality = wQuality,
                                 selected = viewingPly == whitePly,
-                                onClick = { onJumpToPly(whitePly) },
+                                onClick = {
+                                    onJumpToPly(whitePly)
+                                    if (viewingPly == whitePly && wReviewed != null) {
+                                        onInspectMove(wReviewed)
+                                    }
+                                },
                                 modifier = Modifier.weight(1f).testTag("move_ply_$whitePly"),
                             )
                             Spacer(Modifier.width(4.dp))
                             if (pair.size > 1) {
                                 MoveHistoryPlyPill(
                                     san = pair[1],
+                                    quality = bQuality,
                                     selected = viewingPly == blackPly,
-                                    onClick = { onJumpToPly(blackPly) },
+                                    onClick = {
+                                        onJumpToPly(blackPly)
+                                        if (viewingPly == blackPly && bReviewed != null) {
+                                            onInspectMove(bReviewed)
+                                        }
+                                    },
                                     modifier = Modifier.weight(1f).testTag("move_ply_$blackPly"),
                                 )
                             } else {
@@ -983,6 +1194,7 @@ private fun MoveHistoryPanel(
 @Composable
 private fun MoveHistoryPlyPill(
     san: String,
+    quality: MoveQuality?,
     selected: Boolean,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
@@ -995,14 +1207,22 @@ private fun MoveHistoryPlyPill(
         color = if (selected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
         border = if (selected) BorderStroke(1.dp, MaterialTheme.colorScheme.primary) else null,
     ) {
-        Text(
-            text = san,
-            style = MaterialTheme.typography.bodySmall,
-            fontFamily = FontFamily.Monospace,
-            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
-            color = if (selected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface,
+        Row(
             modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
-        )
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = san,
+                style = MaterialTheme.typography.bodySmall,
+                fontFamily = FontFamily.Monospace,
+                fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                color = if (selected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface,
+            )
+            if (quality != null) {
+                MoveQualityBadge(quality = quality, compact = true)
+            }
+        }
     }
 }
 
@@ -1019,99 +1239,96 @@ private fun LocalPgnDialog(
     var pgnDraft by remember { mutableStateOf("") }
     var feedback by remember { mutableStateOf<String?>(null) }
 
-    AlertDialog(
+    GamebitDialog(
         onDismissRequest = onDismiss,
-        title = { Text("PGN Export & Import") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                TabRow(selectedTabIndex = tab) {
-                    Tab(selected = tab == 0, onClick = { tab = 0; feedback = null }, text = { Text("Export PGN") })
-                    Tab(selected = tab == 1, onClick = { tab = 1; feedback = null }, text = { Text("Import PGN") })
-                }
-                if (tab == 0) {
-                    Surface(
-                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
-                        shape = RoundedCornerShape(8.dp),
-                        modifier = Modifier.fillMaxWidth().heightIn(min = 120.dp, max = 210.dp),
-                    ) {
-                        Text(
-                            text = currentPgn,
-                            style = MaterialTheme.typography.bodySmall,
-                            fontFamily = FontFamily.Monospace,
-                            modifier = Modifier.verticalScroll(rememberScrollState()).padding(10.dp),
-                        )
-                    }
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedButton(
-                            onClick = {
-                                clipboard.setText(AnnotatedString(currentPgn))
-                                feedback = "PGN copied to clipboard."
-                            },
-                            modifier = Modifier.weight(1f).testTag("copy_pgn_btn"),
-                        ) {
-                            Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(Modifier.width(4.dp))
-                            Text("Copy")
-                        }
-                        OutlinedButton(
-                            onClick = { onSharePgn(currentPgn) },
-                            modifier = Modifier.weight(1f),
-                        ) {
-                            Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(Modifier.width(4.dp))
-                            Text("Share")
-                        }
-                    }
-                    FilledTonalButton(
-                        onClick = { onAnalyzePgn(currentPgn) },
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Text("Open in Deep Analysis")
-                    }
-                } else {
-                    OutlinedTextField(
-                        value = pgnDraft,
-                        onValueChange = {
-                            pgnDraft = it
-                            feedback = null
-                        },
-                        label = { Text("Paste PGN moves or full headers") },
-                        placeholder = { Text("1. e4 e5 2. Nf3 Nc6 3. Bb5 a6") },
-                        modifier = Modifier.fillMaxWidth().heightIn(min = 120.dp, max = 180.dp).testTag("pgn_import_input"),
-                    )
-                    TextButton(
-                        onClick = {
-                            pgnDraft = "1. e4 e5 2. Nf3 Nc6 3. Bb5 a6 4. Ba4 Nf6 5. O-O"
-                            feedback = null
-                        },
-                    ) {
-                        Text("Insert Sample Ruy Lopez PGN")
-                    }
-                    Button(
-                        onClick = {
-                            if (!onImportPgn(pgnDraft)) {
-                                feedback = "Could not parse PGN. Check move notation and try again."
-                            }
-                        },
-                        enabled = pgnDraft.isNotBlank(),
-                        modifier = Modifier.fillMaxWidth().testTag("load_pgn_into_board_btn"),
-                    ) {
-                        Text("Load PGN into Board")
-                    }
-                }
-                feedback?.let { msg ->
-                    Text(
-                        text = msg,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.primary,
-                    )
-                }
-            }
-        },
-        confirmButton = {
+        title = "PGN Export & Import",
+        actions = {
             TextButton(onClick = onDismiss) { Text("Close") }
         },
-    )
+    ) {
+        TabRow(selectedTabIndex = tab) {
+            Tab(selected = tab == 0, onClick = { tab = 0; feedback = null }, text = { Text("Export PGN") })
+            Tab(selected = tab == 1, onClick = { tab = 1; feedback = null }, text = { Text("Import PGN") })
+        }
+        if (tab == 0) {
+            Surface(
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+                shape = RoundedCornerShape(8.dp),
+                modifier = Modifier.fillMaxWidth().heightIn(min = 120.dp, max = 210.dp),
+            ) {
+                Text(
+                    text = currentPgn,
+                    style = MaterialTheme.typography.bodySmall,
+                    fontFamily = FontFamily.Monospace,
+                    modifier = Modifier.verticalScroll(rememberScrollState()).padding(10.dp),
+                )
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(
+                    onClick = {
+                        clipboard.setText(AnnotatedString(currentPgn))
+                        feedback = "PGN copied to clipboard."
+                    },
+                    modifier = Modifier.weight(1f).testTag("copy_pgn_btn"),
+                ) {
+                    Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text("Copy")
+                }
+                OutlinedButton(
+                    onClick = { onSharePgn(currentPgn) },
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text("Share")
+                }
+            }
+            FilledTonalButton(
+                onClick = { onAnalyzePgn(currentPgn) },
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text("Open in Deep Analysis")
+            }
+        } else {
+            OutlinedTextField(
+                value = pgnDraft,
+                onValueChange = {
+                    pgnDraft = it
+                    feedback = null
+                },
+                label = { Text("Paste PGN moves or full headers") },
+                placeholder = { Text("1. e4 e5 2. Nf3 Nc6 3. Bb5 a6") },
+                modifier = Modifier.fillMaxWidth().heightIn(min = 120.dp, max = 180.dp).testTag("pgn_import_input"),
+            )
+            TextButton(
+                onClick = {
+                    pgnDraft = "1. e4 e5 2. Nf3 Nc6 3. Bb5 a6 4. Ba4 Nf6 5. O-O"
+                    feedback = null
+                },
+            ) {
+                Text("Insert Sample Ruy Lopez PGN")
+            }
+            Button(
+                onClick = {
+                    if (!onImportPgn(pgnDraft)) {
+                        feedback = "Could not parse PGN. Check move notation and try again."
+                    }
+                },
+                enabled = pgnDraft.isNotBlank(),
+                modifier = Modifier.fillMaxWidth().testTag("load_pgn_into_board_btn"),
+            ) {
+                Text("Load PGN into Board")
+            }
+        }
+        feedback?.let { msg ->
+            Text(
+                text = msg,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.primary,
+            )
+        }
+    }
 }
 
 @Composable
@@ -1120,6 +1337,8 @@ private fun PlayerClockBar(
     subtitle: String,
     side: PieceColor,
     pieceStyleId: String,
+    bot: BotProfile? = null,
+    playerAvatarId: String? = null,
     timeMs: Long,
     initialTimeMs: Long,
     clockLabel: String,
@@ -1183,18 +1402,39 @@ private fun PlayerClockBar(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
-                    Surface(
-                        shape = RoundedCornerShape(10.dp),
-                        color = if (side == PieceColor.WHITE) Color(0xFFF3F4F6) else Color(0xFF1F2937),
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-                        modifier = Modifier.size(34.dp),
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            PieceMiniIcon(
-                                piece = Piece(PieceType.KING, side),
-                                modifier = Modifier.size(24.dp),
+                    when {
+                        bot != null -> {
+                            BotAvatarView(
+                                bot = bot,
+                                size = 38.dp,
                                 pieceStyleId = pieceStyleId,
+                                cornerRadius = 11.dp,
                             )
+                        }
+                        playerAvatarId != null -> {
+                            PlayerAvatarView(
+                                avatarId = playerAvatarId,
+                                side = side,
+                                size = 38.dp,
+                                pieceStyleId = pieceStyleId,
+                                cornerRadius = 11.dp,
+                            )
+                        }
+                        else -> {
+                            Surface(
+                                shape = RoundedCornerShape(10.dp),
+                                color = if (side == PieceColor.WHITE) Color(0xFFF3F4F6) else Color(0xFF1F2937),
+                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                                modifier = Modifier.size(38.dp),
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    PieceMiniIcon(
+                                        piece = Piece(PieceType.KING, side),
+                                        modifier = Modifier.size(26.dp),
+                                        pieceStyleId = pieceStyleId,
+                                    )
+                                }
+                            }
                         }
                     }
                     Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
@@ -1279,7 +1519,7 @@ private fun PlayerClockBar(
 private fun NewLocalGameBottomSheet(
     currentState: LocalGameUiState,
     onDismiss: () -> Unit,
-    onStart: (PlayMode, ChessVariant, TimeControl, PieceColor, BotProfile, BotProfile) -> Unit,
+    onStart: (PlayMode, ChessVariant, TimeControl, PieceColor, BotProfile, BotProfile, Boolean) -> Unit,
 ) {
     var mode by remember { mutableStateOf(currentState.mode) }
     var variant by remember { mutableStateOf(currentState.variant) }
@@ -1292,6 +1532,7 @@ private fun NewLocalGameBottomSheet(
     var bot by remember { mutableStateOf(currentState.bot) }
     var selectedDifficulty by remember { mutableStateOf(currentState.aiDifficulty) }
     var botBlack by remember { mutableStateOf(currentState.botBlack) }
+    var ratedGame by remember { mutableStateOf(currentState.ratedGame) }
 
     ModalBottomSheet(onDismissRequest = onDismiss) {
         LazyColumn(
@@ -1344,19 +1585,46 @@ private fun NewLocalGameBottomSheet(
                         if (mode == PlayMode.BOT_VS_BOT) "White Bot (${ChessHubBots.ALL.size} Profiles)" else "Or Select Specific Bot (${ChessHubBots.ALL.size} Bots)",
                         style = MaterialTheme.typography.labelLarge,
                     )
+                    Spacer(Modifier.height(4.dp))
                     LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        items(ChessHubBots.ALL) { b ->
-                            FilterChip(
+                        items(ChessHubBots.ALL, key = { it.id }) { b ->
+                            BotSelectorChipCard(
+                                bot = b,
                                 selected = bot.id == b.id,
+                                testTag = "bot_option_${b.id}",
                                 onClick = {
                                     bot = b
                                     selectedDifficulty = AiDifficulty.fromBotProfile(b)
                                 },
-                                label = { Text("${b.name} (${b.approxStrengthLabel})") },
                             )
                         }
                     }
-                    Text("${bot.approxStrengthLabel} • ${bot.styleTag} — ${bot.bio}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Spacer(Modifier.height(6.dp))
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            BotAvatarView(bot = bot, size = 40.dp)
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    "${bot.name} (${bot.approxStrengthLabel}) • ${bot.voiceProfile.voiceStyle.label} Voice",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.Bold,
+                                )
+                                Text(
+                                    "${bot.styleTag} — ${bot.bio}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                    }
                     if (mode == PlayMode.VS_BOT) {
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 6.dp)) {
                             FilterChip(
@@ -1373,12 +1641,14 @@ private fun NewLocalGameBottomSheet(
                     } else {
                         Spacer(Modifier.height(8.dp))
                         Text("Black Bot", style = MaterialTheme.typography.labelLarge)
+                        Spacer(Modifier.height(4.dp))
                         LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            items(ChessHubBots.ALL) { b ->
-                                FilterChip(
+                            items(ChessHubBots.ALL, key = { "black_${it.id}" }) { b ->
+                                BotSelectorChipCard(
+                                    bot = b,
                                     selected = botBlack.id == b.id,
+                                    testTag = "bot_black_option_${b.id}",
                                     onClick = { botBlack = b },
-                                    label = { Text("${b.name} (${b.approxStrengthLabel})") },
                                 )
                             }
                         }
@@ -1411,13 +1681,31 @@ private fun NewLocalGameBottomSheet(
                     }
                 }
                 if (!useCustomClock) {
-                    FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        TimeControl.PRESETS.forEach { tc ->
-                            FilterChip(
-                                selected = selectedPreset.label == tc.label,
-                                onClick = { selectedPreset = tc },
-                                label = { Text(tc.label) },
-                            )
+                    val grouped = listOf(
+                        "Bullet" to TimeControl.PRESETS.filter { it.category == "bullet" },
+                        "Blitz" to TimeControl.PRESETS.filter { it.category == "blitz" },
+                        "Rapid" to TimeControl.PRESETS.filter { it.category == "rapid" },
+                        "Classical & Other" to TimeControl.PRESETS.filter { it.category !in listOf("bullet", "blitz", "rapid") },
+                    )
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        grouped.forEach { (catTitle, list) ->
+                            if (list.isNotEmpty()) {
+                                Text(
+                                    text = catTitle,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    fontWeight = FontWeight.Bold,
+                                )
+                                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    list.forEach { tc ->
+                                        FilterChip(
+                                            selected = selectedPreset.label == tc.label,
+                                            onClick = { selectedPreset = tc },
+                                            label = { Text(tc.label) },
+                                        )
+                                    }
+                                }
+                            }
                         }
                     }
                 } else {
@@ -1435,6 +1723,25 @@ private fun NewLocalGameBottomSheet(
                     }
                 }
             }
+            if (mode == PlayMode.VS_BOT) {
+                item {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Rated Game (Bot)", style = MaterialTheme.typography.labelLarge)
+                            Text("Updates your local Bullet/Blitz/Rapid/Classical Elo", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        Switch(
+                            checked = ratedGame,
+                            onCheckedChange = { ratedGame = it },
+                            modifier = Modifier.testTag("setup_rated_switch"),
+                        )
+                    }
+                }
+            }
             item {
                 val chosenTc = if (useCustomClock) {
                     val m = customMin.roundToInt()
@@ -1449,7 +1756,7 @@ private fun NewLocalGameBottomSheet(
                     )
                 } else selectedPreset
                 Button(
-                    onClick = { onStart(mode, variant, chosenTc, humanColor, bot, botBlack) },
+                    onClick = { onStart(mode, variant, chosenTc, humanColor, bot, botBlack, ratedGame) },
                     modifier = Modifier.fillMaxWidth().height(50.dp).testTag("start_configured_game_btn"),
                 ) {
                     Text("Start Game")
@@ -1626,27 +1933,39 @@ private fun OnlinePlayContent(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            "${activeGame.whiteName} vs ${activeGame.blackName} (${activeGame.timeControl})",
-                            style = MaterialTheme.typography.titleSmall,
-                            fontWeight = FontWeight.Bold,
+                    Row(
+                        modifier = Modifier.weight(1f),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        PlayerAvatarView(
+                            avatarId = settings.localAvatarId,
+                            side = if (amWhite) PieceColor.WHITE else PieceColor.BLACK,
+                            size = 36.dp,
+                            pieceStyleId = settings.pieceStyleId,
                         )
-                        Text(
-                            text = when (connectionState) {
-                                WebSocketConnectionState.CONNECTED -> "Live WebSocket • Server clocks synced"
-                                WebSocketConnectionState.RECONNECTING,
-                                WebSocketConnectionState.CONNECTING,
-                                -> "Reconnecting to game server..."
-                                WebSocketConnectionState.DISCONNECTED -> "Disconnected • Tap Reconnect"
-                            },
-                            style = MaterialTheme.typography.labelSmall,
-                            color = if (connectionState == WebSocketConnectionState.CONNECTED) {
-                                MaterialTheme.colorScheme.primary
-                            } else {
-                                MaterialTheme.colorScheme.error
-                            },
-                        )
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                "${activeGame.whiteName} vs ${activeGame.blackName} (${activeGame.timeControl})",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Bold,
+                            )
+                            Text(
+                                text = when (connectionState) {
+                                    WebSocketConnectionState.CONNECTED -> "Live WebSocket • Server clocks synced"
+                                    WebSocketConnectionState.RECONNECTING,
+                                    WebSocketConnectionState.CONNECTING,
+                                    -> "Reconnecting to game server..."
+                                    WebSocketConnectionState.DISCONNECTED -> "Disconnected • Tap Reconnect"
+                                },
+                                style = MaterialTheme.typography.labelSmall,
+                                color = if (connectionState == WebSocketConnectionState.CONNECTED) {
+                                    MaterialTheme.colorScheme.primary
+                                } else {
+                                    MaterialTheme.colorScheme.error
+                                },
+                            )
+                        }
                     }
                     Row {
                         if (connectionState != WebSocketConnectionState.CONNECTED) {
@@ -1674,6 +1993,7 @@ private fun OnlinePlayContent(
                         pieceStyleId = settings.pieceStyleId,
                         moveAnimation = settings.moveAnimation,
                         reducedAnimations = settings.reducedAnimations,
+                        animationMode = settings.animationMode,
                         animationSpeed = settings.animationSpeed,
                         onMoveSelected = onOnlineMove,
                     )
@@ -1750,6 +2070,58 @@ private fun OnlinePlayContent(
     }
 }
 
+@Composable
+private fun BotSelectorChipCard(
+    bot: BotProfile,
+    selected: Boolean,
+    testTag: String,
+    onClick: () -> Unit,
+) {
+    Surface(
+        modifier = Modifier
+            .widthIn(min = 128.dp, max = 168.dp)
+            .minimumInteractiveComponentSize()
+            .clickable(onClick = onClick)
+            .testTag(testTag),
+        shape = RoundedCornerShape(12.dp),
+        color = if (selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.65f),
+        border = BorderStroke(
+            width = if (selected) 2.dp else 1.dp,
+            color = if (selected) Color(bot.avatarSpec.accentHex) else MaterialTheme.colorScheme.outlineVariant,
+        ),
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 7.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            BotAvatarView(bot = bot, size = 34.dp, cornerRadius = 9.dp)
+            Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
+                Text(
+                    text = bot.name,
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = "${bot.approxStrengthLabel} • ${bot.voiceProfile.voiceStyle.label}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+    }
+}
+
+private fun botForColor(state: LocalGameUiState, color: PieceColor): BotProfile? = when (state.mode) {
+    PlayMode.PASS_AND_PLAY -> null
+    PlayMode.VS_BOT -> if (color != state.humanColor) state.bot else null
+    PlayMode.BOT_VS_BOT -> if (color == PieceColor.WHITE) state.bot else state.botBlack
+}
+
 private fun playerLabelFor(state: LocalGameUiState, color: PieceColor): String = when (state.mode) {
     PlayMode.PASS_AND_PLAY -> if (color == PieceColor.WHITE) "Player White" else "Player Black"
     PlayMode.VS_BOT -> if (color == state.humanColor) "You" else state.bot.name
@@ -1761,11 +2133,11 @@ private fun playerSubtitleFor(state: LocalGameUiState, color: PieceColor): Strin
     PlayMode.VS_BOT -> if (color == state.humanColor) {
         "${if (color == PieceColor.WHITE) "White" else "Black"} • Human"
     } else {
-        "${state.bot.approxStrengthLabel} • ${state.bot.styleTag}"
+        "${state.bot.approxStrengthLabel} • ${state.bot.styleTag} • ${state.bot.voiceProfile.voiceStyle.label} Voice"
     }
     PlayMode.BOT_VS_BOT -> {
         val b = if (color == PieceColor.WHITE) state.bot else state.botBlack
-        "${b.approxStrengthLabel} • ${b.styleTag}"
+        "${b.approxStrengthLabel} • ${b.styleTag} • ${b.voiceProfile.voiceStyle.label} Voice"
     }
 }
 

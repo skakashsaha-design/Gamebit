@@ -35,8 +35,8 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Psychology
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Terminal
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -74,12 +74,15 @@ import com.example.chess.MasterGamesCatalog
 import com.example.chess.Move
 import com.example.chess.MoveGenerator
 import com.example.chess.MoveNode
+import com.example.chess.MoveQuality
 import com.example.chess.OpeningBook
 import com.example.chess.PgnParser
 import com.example.chess.Piece
 import com.example.chess.PieceColor
 import com.example.chess.PieceType
+import com.example.chess.ReviewedMove
 import com.example.chess.Square
+import com.example.data.local.AnimationMode
 import com.example.data.local.AppSettings
 import com.example.data.local.CollectionEntity
 import com.example.data.local.LocalGameEntity
@@ -87,9 +90,14 @@ import com.example.data.local.LocalStudyEntity
 import com.example.ui.components.ChessBoardView
 import com.example.ui.components.EvaluationBar
 import com.example.ui.components.EvaluationGraph
+import com.example.ui.components.EvaluationPill
+import com.example.ui.components.GamebitDialog
+import com.example.ui.components.MoveExplanationDialog
+import com.example.ui.components.MoveQualityBadge
 import com.example.ui.components.PieceMiniIcon
 import com.example.ui.theme.ChessBoardThemes
 import com.example.viewmodel.AnalysisUiState
+import kotlin.math.abs
 
 @Composable
 fun AnalyzeScreen(
@@ -132,6 +140,8 @@ fun AnalyzeScreen(
     onCreateCollection: (String, String) -> Unit,
     onPlayFromPosition: (String) -> Unit,
     onShareText: (String, String) -> Unit,
+    onStopEngine: () -> Unit = {},
+    onSetAutoplaySpeed: (Float) -> Unit = {},
 ) {
     var selectedTab by remember { mutableIntStateOf(0) }
     val boardTheme = remember(settings.boardThemeId, settings.highContrast) {
@@ -156,13 +166,16 @@ fun AnalyzeScreen(
                 boardTheme = boardTheme,
                 onPlayMove = onPlayMove,
                 onToggleEngine = onToggleEngine,
+                onStopEngine = onStopEngine,
                 onToggleFlip = onToggleFlip,
                 onJumpStart = onJumpStart,
                 onStepBack = onStepBack,
                 onStepForward = onStepForward,
                 onJumpEnd = onJumpEnd,
+                onJumpToPly = onJumpToPly,
                 onSelectNode = onSelectNode,
                 onToggleAutoplay = onToggleAutoplay,
+                onSetAutoplaySpeed = onSetAutoplaySpeed,
                 onSetComment = onSetComment,
                 onToggleNag = onToggleNag,
                 onToggleCircleSquare = onToggleCircleSquare,
@@ -244,13 +257,16 @@ private fun AnalysisBoardTab(
     boardTheme: com.example.ui.theme.BoardThemeColors,
     onPlayMove: (Move) -> Unit,
     onToggleEngine: () -> Unit,
+    onStopEngine: () -> Unit,
     onToggleFlip: () -> Unit,
     onJumpStart: () -> Unit,
     onStepBack: () -> Unit,
     onStepForward: () -> Unit,
     onJumpEnd: () -> Unit,
+    onJumpToPly: (Int) -> Unit,
     onSelectNode: (MoveNode) -> Unit,
     onToggleAutoplay: () -> Unit,
+    onSetAutoplaySpeed: (Float) -> Unit,
     onSetComment: (String) -> Unit,
     onToggleNag: (Int) -> Unit,
     onToggleCircleSquare: (Square) -> Unit,
@@ -272,6 +288,12 @@ private fun AnalysisBoardTab(
     var showUciConsole by remember { mutableStateOf(false) }
     var uciCommandInput by remember { mutableStateOf("go depth 2") }
     var showSavePuzzleDialog by remember { mutableStateOf(false) }
+    var inspectedMove by remember { mutableStateOf<ReviewedMove?>(null) }
+
+    val reduceMotion = settings.reducedAnimations || settings.lowMemoryMode || settings.animationMode != AnimationMode.FULL
+    val reviewedByPly = remember(state.reviewReport) {
+        state.reviewReport?.moves?.associateBy { it.ply }.orEmpty()
+    }
 
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(horizontal = 12.dp),
@@ -284,12 +306,21 @@ private fun AnalysisBoardTab(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = state.openingMatch?.let { "${it.eco} • ${it.name}" } ?: "Analysis Board",
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.Bold,
-                    )
+                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        Text(
+                            text = state.openingMatch?.let { "${it.name} (${it.eco})" } ?: "Analysis Board",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.weight(1f, fill = false),
+                        )
+                        if (state.openingMatch != null && state.currentNode.ply <= 16) {
+                            MoveQualityBadge(quality = MoveQuality.BOOK, compact = true)
+                        }
+                    }
                     state.gambitMatch?.let { g ->
                         Text(
                             text = "Gambit: ${g.name} (${g.status})",
@@ -306,6 +337,16 @@ private fun AnalysisBoardTab(
                     }
                 }
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    if (state.engineEnabled || state.isAutoPlaying) {
+                        OutlinedButton(
+                            onClick = onStopEngine,
+                            modifier = Modifier.testTag("stop_engine_btn"),
+                        ) {
+                            Icon(Icons.Default.Stop, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text("Stop")
+                        }
+                    }
                     Text("Engine", style = MaterialTheme.typography.labelMedium)
                     Switch(
                         checked = state.engineEnabled,
@@ -334,7 +375,7 @@ private fun AnalysisBoardTab(
                     state = state.currentNode.state,
                     legalMoves = state.legalMoves,
                     theme = boardTheme,
-                    modifier = Modifier.weight(1f).widthIn(max = 480.dp),
+                    modifier = Modifier.weight(1f).widthIn(max = 460.dp),
                     flipped = state.flipped,
                     interactive = true,
                     allowBothSides = true,
@@ -345,6 +386,7 @@ private fun AnalysisBoardTab(
                     pieceStyleId = settings.pieceStyleId,
                     moveAnimation = settings.moveAnimation,
                     reducedAnimations = settings.reducedAnimations,
+                    animationMode = settings.animationMode,
                     animationSpeed = settings.animationSpeed,
                     annotationMode = annotationMode && settings.allowBoardArrows,
                     lastMove = state.currentNode.move,
@@ -357,21 +399,117 @@ private fun AnalysisBoardTab(
             }
         }
 
-        // Navigation controls
+        // Evaluation Pill
         item {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceEvenly,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                IconButton(onClick = onJumpStart) { Icon(Icons.Default.FirstPage, contentDescription = "Start") }
-                IconButton(onClick = onStepBack) { Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, contentDescription = "Back") }
-                IconButton(onClick = onToggleAutoplay) {
-                    Icon(if (state.isAutoPlaying) Icons.Default.Pause else Icons.Default.PlayArrow, contentDescription = "Autoplay")
+            Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                EvaluationPill(topLine = state.engineLines.firstOrNull())
+            }
+        }
+
+        // Navigation controls & Autoplay Speed Chips
+        item {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceEvenly,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    IconButton(onClick = onJumpStart) { Icon(Icons.Default.FirstPage, contentDescription = "Start") }
+                    IconButton(onClick = onStepBack) { Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, contentDescription = "Back") }
+                    IconButton(onClick = onToggleAutoplay) {
+                        Icon(if (state.isAutoPlaying) Icons.Default.Pause else Icons.Default.PlayArrow, contentDescription = "Autoplay")
+                    }
+                    IconButton(onClick = onStepForward) { Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = "Forward") }
+                    IconButton(onClick = onJumpEnd) { Icon(Icons.Default.LastPage, contentDescription = "End") }
+                    IconButton(onClick = onToggleFlip) { Icon(Icons.Default.FlipCameraAndroid, contentDescription = "Flip") }
                 }
-                IconButton(onClick = onStepForward) { Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = "Forward") }
-                IconButton(onClick = onJumpEnd) { Icon(Icons.Default.LastPage, contentDescription = "End") }
-                IconButton(onClick = onToggleFlip) { Icon(Icons.Default.FlipCameraAndroid, contentDescription = "Flip") }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text("Speed:", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Spacer(Modifier.width(8.dp))
+                    listOf(
+                        0.5f to ("0.5×" to "autoplay_speed_0.5x"),
+                        1.0f to ("1×" to "autoplay_speed_1x"),
+                        2.0f to ("2×" to "autoplay_speed_2x"),
+                    ).forEach { (mult, labelAndTag) ->
+                        FilterChip(
+                            selected = abs(state.autoplayMultiplier - mult) < 0.05f,
+                            onClick = { onSetAutoplaySpeed(mult) },
+                            label = { Text(labelAndTag.first) },
+                            modifier = Modifier.padding(horizontal = 3.dp).testTag(labelAndTag.second),
+                        )
+                    }
+                }
+            }
+        }
+
+        // Compact Paired Move List (2-column pairs, active highlight, quality badges, click-to-jump + Why?)
+        item {
+            val mainNodes = state.rootNode.mainLine()
+            if (mainNodes.isNotEmpty()) {
+                val pairs = remember(mainNodes) { mainNodes.chunked(2) }
+                Card(
+                    modifier = Modifier.fillMaxWidth().testTag("analysis_paired_move_list"),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                ) {
+                    Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text("Move List (tap to jump, tap badge for why)", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                        pairs.forEachIndexed { pairIdx, pair ->
+                            val whiteNode = pair[0]
+                            val blackNode = pair.getOrNull(1)
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            ) {
+                                Text(
+                                    text = "${pairIdx + 1}.",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.width(28.dp),
+                                )
+                                AnalysisMoveCell(
+                                    node = whiteNode,
+                                    isSelected = whiteNode.id == state.currentNode.id,
+                                    reviewedMove = reviewedByPly[whiteNode.ply],
+                                    onSelect = { onSelectNode(whiteNode) },
+                                    onInspect = { rm -> inspectedMove = rm },
+                                    modifier = Modifier.weight(1f),
+                                )
+                                if (blackNode != null) {
+                                    AnalysisMoveCell(
+                                        node = blackNode,
+                                        isSelected = blackNode.id == state.currentNode.id,
+                                        reviewedMove = reviewedByPly[blackNode.ply],
+                                        onSelect = { onSelectNode(blackNode) },
+                                        onInspect = { rm -> inspectedMove = rm },
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                } else {
+                                    Spacer(Modifier.weight(1f))
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Evaluation Graph directly below move list when a review exists
+        state.reviewReport?.let { rep ->
+            if (rep.moves.isNotEmpty()) {
+                item {
+                    EvaluationGraph(
+                        reviewedMoves = rep.moves,
+                        selectedPly = state.currentNode.ply,
+                        onSelectPly = onJumpToPly,
+                        reducedAnimations = reduceMotion,
+                    )
+                }
             }
         }
 
@@ -613,17 +751,24 @@ private fun AnalysisBoardTab(
                 }
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 6.dp)) {
-                OutlinedButton(onClick = { onShareText("ChessHub PGN", onExportPgn()) }, modifier = Modifier.weight(1f)) {
+                OutlinedButton(onClick = { onShareText("Gamebit PGN", onExportPgn()) }, modifier = Modifier.weight(1f)) {
                     Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(16.dp))
                     Spacer(Modifier.width(4.dp))
                     Text("Share PGN")
                 }
-                OutlinedButton(onClick = { onShareText("ChessHub FEN", state.currentNode.state.toFen()) }, modifier = Modifier.weight(1f)) {
+                OutlinedButton(onClick = { onShareText("Gamebit FEN", state.currentNode.state.toFen()) }, modifier = Modifier.weight(1f)) {
                     Text("Share FEN")
                 }
             }
             Spacer(Modifier.height(16.dp))
         }
+    }
+
+    inspectedMove?.let { rm ->
+        MoveExplanationDialog(
+            reviewedMove = rm,
+            onDismiss = { inspectedMove = null },
+        )
     }
 
     if (showSavePuzzleDialog) {
@@ -634,28 +779,64 @@ private fun AnalysisBoardTab(
         var ratingText by remember { mutableStateOf("1400") }
         var hint by remember { mutableStateOf("Look for checks, captures, and undefended targets.") }
 
-        AlertDialog(
+        GamebitDialog(
             onDismissRequest = { showSavePuzzleDialog = false },
-            title = { Text("Save Position as Puzzle") },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(value = title, onValueChange = { title = it }, label = { Text("Puzzle Title") }, singleLine = true)
-                    OutlinedTextField(value = solutionUci, onValueChange = { solutionUci = it }, label = { Text("Solution UCI (e.g. e2e4 or e2e4 e7e5)") }, singleLine = true)
-                    OutlinedTextField(value = theme, onValueChange = { theme = it }, label = { Text("Theme") }, singleLine = true)
-                    OutlinedTextField(value = ratingText, onValueChange = { ratingText = it.filter(Char::isDigit) }, label = { Text("Rating") }, singleLine = true)
-                    OutlinedTextField(value = hint, onValueChange = { hint = it }, label = { Text("Hint") })
-                }
-            },
-            confirmButton = {
+            title = "Save Position as Puzzle",
+            subtitle = "Store this tactical position in your local puzzle trainer",
+            actions = {
+                TextButton(onClick = { showSavePuzzleDialog = false }) { Text("Cancel") }
+                Spacer(Modifier.width(8.dp))
                 Button(onClick = {
                     onSaveCurrentAsPuzzle(title, solutionUci, theme, ratingText.toIntOrNull() ?: 1400, hint)
                     showSavePuzzleDialog = false
                 }) { Text("Save") }
             },
-            dismissButton = {
-                TextButton(onClick = { showSavePuzzleDialog = false }) { Text("Cancel") }
-            },
-        )
+        ) {
+            OutlinedTextField(value = title, onValueChange = { title = it }, label = { Text("Puzzle Title") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+            OutlinedTextField(value = solutionUci, onValueChange = { solutionUci = it }, label = { Text("Solution UCI (e.g. e2e4 or e2e4 e7e5)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+            OutlinedTextField(value = theme, onValueChange = { theme = it }, label = { Text("Theme") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+            OutlinedTextField(value = ratingText, onValueChange = { ratingText = it.filter(Char::isDigit) }, label = { Text("Rating") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+            OutlinedTextField(value = hint, onValueChange = { hint = it }, label = { Text("Hint") }, modifier = Modifier.fillMaxWidth())
+        }
+    }
+}
+
+@Composable
+private fun AnalysisMoveCell(
+    node: MoveNode,
+    isSelected: Boolean,
+    reviewedMove: ReviewedMove?,
+    onSelect: () -> Unit,
+    onInspect: (ReviewedMove) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        modifier = modifier.clickable { onSelect() },
+        shape = RoundedCornerShape(8.dp),
+        color = if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+        border = if (isSelected) BorderStroke(1.dp, MaterialTheme.colorScheme.primary) else null,
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Text(
+                text = node.san,
+                style = MaterialTheme.typography.bodySmall,
+                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+            )
+            if (reviewedMove != null) {
+                MoveQualityBadge(
+                    quality = reviewedMove.quality,
+                    compact = true,
+                    modifier = Modifier.clickable {
+                        onSelect()
+                        onInspect(reviewedMove)
+                    },
+                )
+            }
+        }
     }
 }
 
@@ -671,6 +852,8 @@ private fun GameReviewTab(
     onPlayFromPosition: (String) -> Unit,
 ) {
     var moveFilter by remember { mutableStateOf("All") }
+    var inspectedMove by remember { mutableStateOf<ReviewedMove?>(null) }
+    val reduceMotion = settings.reducedAnimations || settings.lowMemoryMode || settings.animationMode != AnimationMode.FULL
 
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(14.dp),
@@ -698,38 +881,106 @@ private fun GameReviewTab(
         if (report == null) {
             item {
                 Text(
-                    "Import a PGN, load a game from Archive, or play moves on the Analysis board, then run Game Review for accuracy percentages, phase breakdown, move classifications, Missed Wins/Mates, and full 10-point mistake explanations.",
+                    "Import a PGN, load a game from Archive, or play moves on the Analysis board, then run Game Review for accuracy percentages, phase breakdown, ACPL, turning points, and full mistake explanations.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
         } else {
             item {
+                val wOp = report.whiteOpeningAccuracy?.let { "$it%" } ?: "--"
+                val wMid = report.whiteMiddlegameAccuracy?.let { "$it%" } ?: "--"
+                val wEnd = report.whiteEndgameAccuracy?.let { "$it%" } ?: "--"
+                val bOp = report.blackOpeningAccuracy?.let { "$it%" } ?: "--"
+                val bMid = report.blackMiddlegameAccuracy?.let { "$it%" } ?: "--"
+                val bEnd = report.blackEndgameAccuracy?.let { "$it%" } ?: "--"
+
                 Card(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.fillMaxWidth().testTag("game_review_summary_card"),
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                     border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                 ) {
-                    Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Text("Accuracy Summary", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("Accuracy & Comparison Summary", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text("White: ${report.whiteAccuracy}%", fontWeight = FontWeight.SemiBold)
-                            Text("Black: ${report.blackAccuracy}%", fontWeight = FontWeight.SemiBold)
+                            Column {
+                                Text("White: ${report.whiteAccuracy}%", fontWeight = FontWeight.Bold)
+                                Text("ACPL: ${report.whiteAcpl} cp", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            Column(horizontalAlignment = Alignment.End) {
+                                Text("Black: ${report.blackAccuracy}%", fontWeight = FontWeight.Bold)
+                                Text("ACPL: ${report.blackAcpl} cp", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
                         }
                         Text(
-                            "Phases — Opening ${report.openingAccuracy}% • Middlegame ${report.middlegameAccuracy}% • Endgame ${report.endgameAccuracy}%",
+                            "White Phases — Opening $wOp • Middlegame $wMid • Endgame $wEnd",
                             style = MaterialTheme.typography.bodySmall,
                         )
                         Text(
-                            "White: ${report.whiteInaccuracies} Inacc • ${report.whiteMistakes} Mist • ${report.whiteBlunders} Blund • ${report.whiteMissedWins} Missed Win • ${report.whiteMissedMates} Missed Mate",
+                            "Black Phases — Opening $bOp • Middlegame $bMid • Endgame $bEnd",
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                        if (report.advantageSummary.isNotBlank()) {
+                            Text(
+                                text = report.advantageSummary,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.primary,
+                            )
+                        }
+                        Text(
+                            "White: ${report.whiteQualityCounts[MoveQuality.BRILLIANT] ?: 0} !! • ${report.whiteQualityCounts[MoveQuality.GREAT] ?: 0} ! • ${report.whiteInaccuracies} Inacc • ${report.whiteMistakes} Mist • ${report.whiteBlunders} Blund • ${report.whiteMissedWins} Miss • ${report.whiteMissedMates} Missed Mate",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                         Text(
-                            "Black: ${report.blackInaccuracies} Inacc • ${report.blackMistakes} Mist • ${report.blackBlunders} Blund • ${report.blackMissedWins} Missed Win • ${report.blackMissedMates} Missed Mate",
+                            "Black: ${report.blackQualityCounts[MoveQuality.BRILLIANT] ?: 0} !! • ${report.blackQualityCounts[MoveQuality.GREAT] ?: 0} ! • ${report.blackInaccuracies} Inacc • ${report.blackMistakes} Mist • ${report.blackBlunders} Blund • ${report.blackMissedWins} Miss • ${report.blackMissedMates} Missed Mate",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
+                        report.whiteBestMove?.let { m ->
+                            Text("White Best: ${m.san} (${m.quality.label})", style = MaterialTheme.typography.labelSmall)
+                        }
+                        report.blackBestMove?.let { m ->
+                            Text("Black Best: ${m.san} (${m.quality.label})", style = MaterialTheme.typography.labelSmall)
+                        }
+                        report.whiteWorstMove?.let { m ->
+                            Text("White Critical Error: ${m.san} (-${m.cpLoss} cp)", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
+                        }
+                        report.blackWorstMove?.let { m ->
+                            Text("Black Critical Error: ${m.san} (-${m.cpLoss} cp)", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
+                        }
+                        report.whiteMissedOpportunity?.let { m ->
+                            Text("White Missed Opportunity: ${m.san} (Best ${m.bestMoveSan})", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.secondary)
+                        }
+                        report.blackMissedOpportunity?.let { m ->
+                            Text("Black Missed Opportunity: ${m.san} (Best ${m.bestMoveSan})", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.secondary)
+                        }
+                    }
+                }
+            }
+
+            if (report.turningPoints.isNotEmpty()) {
+                item {
+                    Card(
+                        modifier = Modifier.fillMaxWidth().testTag("turning_points_card"),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text("Key Turning Points", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                            report.turningPoints.forEach { tp ->
+                                Row(
+                                    modifier = Modifier.fillMaxWidth().clickable { onJumpToPly(tp.ply) }.padding(vertical = 4.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text("${(tp.ply + 1) / 2}${if (tp.ply % 2 == 1) "." else "..."} ${tp.san} — ${tp.title}", fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodySmall)
+                                        Text(tp.description, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
+                                    MoveQualityBadge(quality = tp.quality, compact = true)
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -739,6 +990,7 @@ private fun GameReviewTab(
                     reviewedMoves = report.moves,
                     selectedPly = state.currentNode.ply,
                     onSelectPly = onJumpToPly,
+                    reducedAnimations = reduceMotion,
                 )
             }
 
@@ -748,11 +1000,12 @@ private fun GameReviewTab(
                         state = state.currentNode.state,
                         legalMoves = state.legalMoves,
                         theme = boardTheme,
-                        modifier = Modifier.widthIn(max = 420.dp),
+                        modifier = Modifier.widthIn(max = 380.dp),
                         showCoordinates = settings.showCoordinates,
                         pieceStyleId = settings.pieceStyleId,
                         moveAnimation = settings.moveAnimation,
                         reducedAnimations = settings.reducedAnimations,
+                        animationMode = settings.animationMode,
                         animationSpeed = settings.animationSpeed,
                         lastMove = state.currentNode.move,
                         onMoveSelected = onPlayMove,
@@ -786,9 +1039,19 @@ private fun GameReviewTab(
                     border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                 ) {
                     Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text("${rm.ply}. ${rm.san} ${rm.quality.symbol}", fontWeight = FontWeight.SemiBold)
-                            Text("${rm.quality.label} (-${rm.cpLoss} cp)", style = MaterialTheme.typography.labelSmall)
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text("${rm.ply}. ${rm.san}", fontWeight = FontWeight.SemiBold)
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                MoveQualityBadge(quality = rm.quality, compact = true)
+                                Text("-${rm.cpLoss} cp", style = MaterialTheme.typography.labelSmall)
+                                TextButton(onClick = { inspectedMove = rm }) {
+                                    Text("Why?")
+                                }
+                            }
                         }
                         Text(rm.coachExplanation, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
 
@@ -822,6 +1085,13 @@ private fun GameReviewTab(
             }
         }
     }
+
+    inspectedMove?.let { rm ->
+        MoveExplanationDialog(
+            reviewedMove = rm,
+            onDismiss = { inspectedMove = null },
+        )
+    }
 }
 
 @Composable
@@ -835,7 +1105,7 @@ private fun ExploreMasterAndGambitsTab(
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         item {
-            Text("ChessHub Explore & Repertoire", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            Text("Gamebit Explore & Repertoire", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 6.dp)) {
                 FilterChip(selected = section == 0, onClick = { section = 0 }, label = { Text("Master Games (${MasterGamesCatalog.FAMOUS_GAMES.size})") })
                 FilterChip(selected = section == 1, onClick = { section = 1 }, label = { Text("Named Gambits (${OpeningBook.NAMED_GAMBITS.size})") })
@@ -1024,7 +1294,7 @@ private fun BoardEditorTab(
                     enabled = err == null,
                     modifier = Modifier.weight(1f),
                 ) { Text("Play Bot") }
-                OutlinedButton(onClick = { onShareText("ChessHub FEN", fen) }) { Text("Share") }
+                OutlinedButton(onClick = { onShareText("Gamebit FEN", fen) }) { Text("Share") }
             }
         }
     }

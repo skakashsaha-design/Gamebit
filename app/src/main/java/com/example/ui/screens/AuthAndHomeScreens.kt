@@ -85,6 +85,7 @@ import com.example.data.local.LocalGameEntity
 import com.example.data.local.PuzzlesAndLessonsCatalog
 import com.example.data.remote.PublicProfileDoc
 import com.example.data.remote.TournamentDoc
+import com.example.ui.components.PlayerAvatarView
 import com.example.ui.components.drawChessPiece
 import com.example.viewmodel.PlayMode
 
@@ -92,12 +93,15 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.filled.CloudDone
+import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
+import com.example.ui.components.GamebitDialog
+import com.example.ui.components.GamebitLogo
 
 @Composable
 fun AuthScreen(
@@ -106,6 +110,7 @@ fun AuthScreen(
     errorMessage: String?,
     onSignInClick: (serverUrl: String, usernameOrEmail: String, password: String) -> Unit,
     onRegisterClick: (serverUrl: String, username: String, email: String, password: String) -> Unit,
+    onGoogleSignInClick: (serverUrl: String, idToken: String, displayName: String?) -> Unit = { _, _, _ -> },
     onContinueOfflineClick: () -> Unit,
 ) {
     var authTab by remember { mutableStateOf(0) } // 0 = Sign In, 1 = Create Account
@@ -115,6 +120,7 @@ fun AuthScreen(
     var registerEmail by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var showPassword by remember { mutableStateOf(false) }
+    var showGoogleDialog by remember { mutableStateOf(false) }
 
     Scaffold { innerPadding ->
         Box(
@@ -132,16 +138,7 @@ fun AuthScreen(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
-                Surface(
-                    modifier = Modifier.size(84.dp),
-                    shape = RoundedCornerShape(24.dp),
-                    color = MaterialTheme.colorScheme.primaryContainer,
-                    border = BorderStroke(2.dp, MaterialTheme.colorScheme.primary),
-                ) {
-                    Canvas(modifier = Modifier.fillMaxSize().padding(14.dp)) {
-                        drawChessPiece(Piece(PieceType.KING, PieceColor.WHITE), Offset.Zero, size.minDimension)
-                    }
-                }
+                GamebitLogo(iconSize = 68.dp, showWordmark = false)
 
                 Text(
                     text = stringResource(R.string.app_name),
@@ -164,12 +161,12 @@ fun AuthScreen(
                         verticalArrangement = Arrangement.spacedBy(10.dp),
                     ) {
                         Text(
-                            text = "ChessHub Online & Offline",
+                            text = "Gamebit Online & Offline",
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.SemiBold,
                         )
                         Text(
-                            text = "Connect to a ChessHub REST + WebSocket server for rated matchmaking, server-validated clocks, leaderboards, and clubs — or continue offline for complete local play, bots, analysis, puzzles, and lessons.",
+                            text = "Connect to a Gamebit REST + WebSocket server for rated matchmaking, server-validated clocks, leaderboards, and clubs — or continue offline for complete local play, bots, analysis, puzzles, and lessons.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -182,7 +179,7 @@ fun AuthScreen(
                         OutlinedTextField(
                             value = serverUrl,
                             onValueChange = { serverUrl = it },
-                            label = { Text("ChessHub Server URL (HTTPS)") },
+                            label = { Text("Gamebit Server URL (HTTPS)") },
                             leadingIcon = { Icon(Icons.Default.CloudDone, contentDescription = null) },
                             singleLine = true,
                             modifier = Modifier.fillMaxWidth().testTag("auth_server_url_input"),
@@ -278,6 +275,19 @@ fun AuthScreen(
                         }
 
                         OutlinedButton(
+                            onClick = { showGoogleDialog = true },
+                            enabled = !isSigningIn,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(48.dp)
+                                .testTag("google_sign_in_btn"),
+                        ) {
+                            Icon(Icons.Default.AccountCircle, contentDescription = null)
+                            Spacer(Modifier.width(8.dp))
+                            Text("Continue with Google")
+                        }
+
+                        OutlinedButton(
                             onClick = onContinueOfflineClick,
                             enabled = !isSigningIn,
                             modifier = Modifier
@@ -297,6 +307,60 @@ fun AuthScreen(
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+            }
+        }
+    }
+
+    if (showGoogleDialog) {
+        var googleIdToken by remember { mutableStateOf("") }
+        var displayName by remember { mutableStateOf("") }
+        var tokenError by remember { mutableStateOf<String?>(null) }
+
+        GamebitDialog(
+            onDismissRequest = { showGoogleDialog = false },
+            title = "Continue with Google",
+            subtitle = "Exchange a Google OAuth ID token directly with your Gamebit REST server (zero Firebase).",
+            actions = {
+                androidx.compose.material3.TextButton(onClick = { showGoogleDialog = false }) {
+                    Text("Cancel")
+                }
+                Button(
+                    onClick = {
+                        if (googleIdToken.trim().length < 10) {
+                            tokenError = "Paste a valid Google OAuth ID token (at least 10 characters)."
+                        } else {
+                            showGoogleDialog = false
+                            onGoogleSignInClick(
+                                serverUrl,
+                                googleIdToken.trim(),
+                                displayName.trim().takeIf { it.isNotBlank() },
+                            )
+                        }
+                    },
+                ) {
+                    Text("Verify & Sign In")
+                }
+            },
+        ) {
+            OutlinedTextField(
+                value = googleIdToken,
+                onValueChange = {
+                    googleIdToken = it
+                    tokenError = null
+                },
+                label = { Text("Google OAuth ID Token") },
+                modifier = Modifier.fillMaxWidth().testTag("google_id_token_input"),
+                maxLines = 3,
+            )
+            OutlinedTextField(
+                value = displayName,
+                onValueChange = { displayName = it },
+                label = { Text("Display Name (optional)") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            tokenError?.let { err ->
+                Text(err, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
             }
         }
     }
@@ -338,36 +402,48 @@ fun HomeScreen(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text(
-                            text = stringResource(R.string.app_name),
-                            style = MaterialTheme.typography.headlineMedium,
-                            fontWeight = FontWeight.Bold,
-                        )
-                        Surface(
-                            shape = CircleShape,
-                            color = if (isOnline) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
-                            modifier = Modifier.clickable { if (!isOnline) onSwitchToOnlineSignIn() },
-                        ) {
-                            Text(
-                                text = if (isOnline) stringResource(R.string.status_online) else stringResource(R.string.status_offline),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = if (isOnline) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
-                            )
-                        }
-                    }
-                    val playerSubtitle = if (myProfile != null) {
-                        "${CountryCatalog.flagForIso(myProfile.countryIso)} ${myProfile.username} • ${myProfile.fideFederation} • Blitz ${myProfile.blitzRating}"
-                    } else {
-                        "${CountryCatalog.flagForIso(settings.countryIso)} ${settings.fideFederation} • Puzzle ${settings.localPuzzleRating}"
-                    }
-                    Text(
-                        text = playerSubtitle,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                Row(
+                    modifier = Modifier.weight(1f),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    PlayerAvatarView(
+                        avatarId = settings.localAvatarId,
+                        size = 44.dp,
+                        pieceStyleId = settings.pieceStyleId,
+                        cornerRadius = 12.dp,
                     )
+                    Column(modifier = Modifier.weight(1f)) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text(
+                                text = stringResource(R.string.app_name),
+                                style = MaterialTheme.typography.headlineMedium,
+                                fontWeight = FontWeight.Bold,
+                            )
+                            Surface(
+                                shape = CircleShape,
+                                color = if (isOnline) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
+                                modifier = Modifier.clickable { if (!isOnline) onSwitchToOnlineSignIn() },
+                            ) {
+                                Text(
+                                    text = if (isOnline) stringResource(R.string.status_online) else stringResource(R.string.status_offline),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = if (isOnline) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                                )
+                            }
+                        }
+                        val playerSubtitle = if (myProfile != null) {
+                            "${CountryCatalog.flagForIso(myProfile.countryIso)} ${myProfile.username} • ${myProfile.fideFederation} • Blitz ${myProfile.blitzRating}"
+                        } else {
+                            "${CountryCatalog.flagForIso(settings.countryIso)} ${settings.localDisplayName} • Puzzle ${settings.localPuzzleRating}"
+                        }
+                        Text(
+                            text = playerSubtitle,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                 }
 
                 Row {
@@ -576,7 +652,7 @@ fun HomeScreen(
                         } else if (isOnline) {
                             "Create or join rated Arena, Swiss, or Simul events"
                         } else {
-                            "Sign in to ChessHub Online to join live Arena & Swiss tournaments"
+                            "Sign in to Gamebit Online to join live Arena & Swiss tournaments"
                         },
                         icon = Icons.Default.EmojiEvents,
                         actionLabel = if (isOnline) "Open Hub" else "Sign In",

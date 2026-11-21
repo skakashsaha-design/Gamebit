@@ -198,7 +198,7 @@ fun ArchiveTab(
                                 tint = MaterialTheme.colorScheme.secondary,
                             )
                         }
-                        IconButton(onClick = { onShareText("ChessHub PGN", game.pgn) }) {
+                        IconButton(onClick = { onShareText("Gamebit PGN", game.pgn) }) {
                             Icon(Icons.Default.Share, contentDescription = "Share PGN")
                         }
                         IconButton(onClick = { onDeleteGame(game.id) }) {

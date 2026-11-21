@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">চেসহাব</string>
+    <string name="app_name">গেমবিট</string>
     <string name="nav_home">হোম</string>
     <string name="nav_play">খেলুন</string>
     <string name="nav_learn">শিখুন</string>
@@ -28,5 +28,5 @@
     <string name="leaderboards">লিডারবোর্ড</string>
     <string name="settings">সেটিংস</string>
     <string name="profile">প্রোফাইল</string>
-    <string name="independent_notice">চেসহাব একটি স্বতন্ত্র দাবা প্ল্যাটফর্ম এবং লিচেস বা চেস.কমের সাথে সম্পর্কিত নয়।</string>
+    <string name="independent_notice">গেমবিট একটি স্বতন্ত্র দাবা প্ল্যাটফর্ম এবং লিচেস বা চেস.কমের সাথে সম্পর্কিত নয়।</string>
 </resources>

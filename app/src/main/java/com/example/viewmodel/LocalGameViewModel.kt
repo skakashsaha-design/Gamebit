@@ -8,28 +8,33 @@ import com.example.audio.VoiceCoachManager
 import com.example.chess.AiDifficulty
 import com.example.chess.BotProfile
 import com.example.chess.ChessBoardState
+import com.example.chess.ChessEngine
 import com.example.chess.ChessHubBots
 import com.example.chess.ChessVariant
 import com.example.chess.ClockType
 import com.example.chess.EndgameClassification
 import com.example.chess.EndgameClassifier
 import com.example.chess.GambitMatch
+import com.example.chess.GameReviewReport
 import com.example.chess.GameStatus
 import com.example.chess.KotlinChessEngineAdapter
 import com.example.chess.LocalChessEngine
 import com.example.chess.Move
 import com.example.chess.MoveGenerator
 import com.example.chess.MoveNode
+import com.example.chess.MoveQuality
 import com.example.chess.MoveValidationResult
 import com.example.chess.OpeningBook
 import com.example.chess.OpeningMatch
 import com.example.chess.PgnParser
 import com.example.chess.PieceColor
 import com.example.chess.PieceType
+import com.example.chess.ReviewedMove
 import com.example.chess.TimeControl
 import com.example.data.local.AppSettings
 import com.example.data.local.LocalChessRepository
 import com.example.data.local.LocalGameEntity
+import com.example.data.local.SettingsRepository
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -44,6 +49,14 @@ enum class PlayMode {
     VS_BOT,
     BOT_VS_BOT,
 }
+
+data class RatingDeltaResult(
+    val oldRating: Int,
+    val newRating: Int,
+    val delta: Int,
+    val ratedGame: Boolean,
+    val category: String,
+)
 
 data class LocalGameUiState(
     val gameId: String = UUID.randomUUID().toString(),
@@ -81,6 +94,13 @@ data class LocalGameUiState(
     val botDialogueText: String = "",
     val savedToArchive: Boolean = false,
     val pendingConfirmMove: Move? = null,
+    val ratedGame: Boolean = true,
+    val lastEloDelta: RatingDeltaResult? = null,
+    val moveQualities: List<MoveQuality?> = emptyList(),
+    val moveExplanations: List<String> = emptyList(),
+    val reviewedMoves: List<ReviewedMove> = emptyList(),
+    val postGameSummary: GameReviewReport? = null,
+    val isGeneratingSummary: Boolean = false,
 ) {
     val isViewingLive: Boolean
         get() = viewingPly >= moveHistorySan.size
@@ -96,6 +116,7 @@ class LocalGameViewModel(
     private val localRepo: LocalChessRepository,
     private val soundManager: SoundAndHapticsManager,
     private val voiceCoach: VoiceCoachManager? = null,
+    private val settingsRepo: SettingsRepository? = null,
     private val engineFactory: (lowMemoryMode: Boolean) -> LocalChessEngine = { lowMem ->
         KotlinChessEngineAdapter(lowMemoryMode = lowMem)
     },
@@ -132,6 +153,7 @@ class LocalGameViewModel(
         bot: BotProfile = _uiState.value.bot,
         botBlack: BotProfile = _uiState.value.botBlack,
         customInitialFen: String? = null,
+        ratedGame: Boolean = _uiState.value.ratedGame,
     ) {
         clockJob?.cancel()
         botJob?.cancel()
@@ -170,10 +192,11 @@ class LocalGameViewModel(
             blackTimeMs = initialMs,
             endgameClassification = endgame,
             botDialogueText = startDialogue,
+            ratedGame = ratedGame,
         )
 
         if (startDialogue.isNotBlank()) {
-            voiceCoach?.speakBot(startDialogue, currentSettings)
+            voiceCoach?.speakBot(startDialogue, currentSettings, bot = bot)
         }
 
         startClockLoop()
@@ -182,16 +205,31 @@ class LocalGameViewModel(
         }
     }
 
+    fun toggleRatedGame(rated: Boolean) {
+        _uiState.update { it.copy(ratedGame = rated) }
+    }
+
     fun selectDifficulty(difficulty: AiDifficulty) {
         val curr = _uiState.value
         val matchedBot = difficulty.toBotProfile()
+        val dialogue = if (curr.mode != PlayMode.PASS_AND_PLAY) matchedBot.dialogueFor("start", curr.moveHistorySan.size) else ""
         _uiState.update {
             it.copy(
                 aiDifficulty = difficulty,
                 bot = matchedBot,
-                botDialogueText = if (curr.mode != PlayMode.PASS_AND_PLAY) matchedBot.dialogueFor("start", curr.moveHistorySan.size) else "",
+                botDialogueText = dialogue,
             )
         }
+        if (dialogue.isNotBlank()) {
+            voiceCoach?.speakBot(dialogue, currentSettings, bot = matchedBot)
+        }
+    }
+
+    fun speakCurrentBotDialogue() {
+        val curr = _uiState.value
+        if (curr.mode == PlayMode.PASS_AND_PLAY || curr.botDialogueText.isBlank()) return
+        val activeBot = if (curr.mode == PlayMode.BOT_VS_BOT && curr.boardState.sideToMove == PieceColor.BLACK) curr.botBlack else curr.bot
+        voiceCoach?.speakBot(curr.botDialogueText, currentSettings, bot = activeBot, isKeyAlert = true)
     }
 
     fun isMoveValid(move: Move): Boolean =
@@ -359,6 +397,9 @@ class LocalGameViewModel(
         val newSans = curr.moveHistorySan.dropLast(stepsBack)
         val newUcis = curr.moveHistoryUci.dropLast(stepsBack)
         val newMoves = curr.moveHistoryMoves.dropLast(stepsBack)
+        val newQualities = curr.moveQualities.dropLast(stepsBack.coerceAtMost(curr.moveQualities.size))
+        val newExplanations = curr.moveExplanations.dropLast(stepsBack.coerceAtMost(curr.moveExplanations.size))
+        val newReviewed = curr.reviewedMoves.filter { it.ply <= newSans.size }
         val restored = newStates.last()
 
         repeat(stepsBack) {
@@ -381,6 +422,9 @@ class LocalGameViewModel(
                 moveHistorySan = newSans,
                 moveHistoryUci = newUcis,
                 moveHistoryMoves = newMoves,
+                moveQualities = newQualities,
+                moveExplanations = newExplanations,
+                reviewedMoves = newReviewed,
                 viewingPly = newSans.size,
                 lastMove = currentNode.move,
                 isBotThinking = false,
@@ -432,6 +476,11 @@ class LocalGameViewModel(
         positionCounts[posKey] = (positionCounts[posKey] ?: 0) + 1
         currentNode = currentNode.addOrGetChild(validMove, san, nextState)
 
+        val stateBefore = curr.boardState
+        val historyBefore = curr.moveHistoryUci
+        val moveIdx = curr.moveHistorySan.size
+        val gameIdSnapshot = curr.gameId
+
         val newUcis = curr.moveHistoryUci + validMove.uci
         val openingMatch = if (curr.variant == ChessVariant.STANDARD && currentSettings.openingRecognitionEnabled) {
             OpeningBook.recognize(newUcis)
@@ -442,7 +491,8 @@ class LocalGameViewModel(
         val endgame = if (currentSettings.endgameRecognitionEnabled) EndgameClassifier.classify(nextState) else null
         val isBook = curr.variant == ChessVariant.STANDARD &&
             currentSettings.openingBookEnabled &&
-            OpeningBook.getLocalBookMoves(curr.boardState, curr.moveHistoryUci).any { it.uci == validMove.uci }
+            historyBefore.size < 16 &&
+            OpeningBook.isBookMove(historyBefore, validMove.uci)
 
         val (newWhiteMs, newBlackMs) = applyIncrement(curr.whiteTimeMs, curr.blackTimeMs, mover, curr.timeControl)
 
@@ -460,16 +510,32 @@ class LocalGameViewModel(
         var dialogue = curr.botDialogueText
         if (fromBot || status.isTerminal) {
             val activeBot = if (curr.mode == PlayMode.BOT_VS_BOT && mover == PieceColor.BLACK) curr.botBlack else curr.bot
+            val capturedPiece = if (validMove.isEnPassant) PieceType.PAWN else curr.boardState.pieceAt(validMove.to)?.type
+            val newOpeningDiscovered = openingMatch != null && curr.openingMatch == null
+            val enteredEndgame = endgame != null && curr.endgameClassification == null
             val event = when {
                 status.isTerminal && winner == mover -> "win"
                 status.isTerminal && winner != null -> "lose"
+                status.isTerminal -> "draw"
                 isCheckNow -> "check"
+                validMove.promotion != null -> "promotion"
+                validMove.isCastling -> "castled"
                 wasCapture -> "capture"
+                enteredEndgame -> "endgame"
+                newOpeningDiscovered -> "opening"
                 else -> "move"
             }
-            if (curr.mode != PlayMode.PASS_AND_PLAY && (status.isTerminal || isCheckNow || wasCapture || newUcis.size % 6 == 0)) {
-                dialogue = activeBot.dialogueFor(event, newUcis.size)
-                voiceCoach?.speakBot(dialogue, currentSettings)
+            if (curr.mode != PlayMode.PASS_AND_PLAY &&
+                (status.isTerminal || isCheckNow || wasCapture || validMove.promotion != null || validMove.isCastling || enteredEndgame || newOpeningDiscovered || newUcis.size % 5 == 0)
+            ) {
+                dialogue = activeBot.dialogueFor(
+                    event = event,
+                    moveCount = newUcis.size,
+                    san = san,
+                    openingName = openingMatch?.name,
+                    capturedPiece = capturedPiece,
+                )
+                voiceCoach?.speakBot(dialogue, currentSettings, bot = activeBot, isKeyAlert = status.isTerminal || isCheckNow)
             }
         }
 
@@ -482,6 +548,8 @@ class LocalGameViewModel(
                 moveHistoryUci = newUcis,
                 moveHistoryMoves = it.moveHistoryMoves + validMove,
                 stateHistory = it.stateHistory + nextState,
+                moveQualities = it.moveQualities + if (isBook) MoveQuality.BOOK else null,
+                moveExplanations = it.moveExplanations + if (isBook) "$san is an established opening book move." else "",
                 viewingPly = updatedSans.size,
                 lastMove = validMove,
                 whiteTimeMs = newWhiteMs,
@@ -497,6 +565,40 @@ class LocalGameViewModel(
                 botDialogueText = dialogue,
                 pendingConfirmMove = null,
             )
+        }
+
+        if (currentSettings.moveFeedbackEnabled && !fromBot && !status.isTerminal) {
+            viewModelScope.launch {
+                val reviewed = ChessEngine(currentSettings.lowMemoryMode).evaluateSingleMove(
+                    stateBefore = stateBefore,
+                    move = validMove,
+                    historyUciBefore = historyBefore,
+                    useOpeningBook = currentSettings.openingBookEnabled,
+                )
+                soundManager.playQualityFeedback(reviewed.quality, currentSettings)
+                var botReactionText: String? = null
+                if (curr.mode == PlayMode.VS_BOT && (reviewed.quality == MoveQuality.BLUNDER || reviewed.quality == MoveQuality.BRILLIANT || reviewed.quality == MoveQuality.GREAT)) {
+                    val reactEvent = if (reviewed.quality == MoveQuality.BLUNDER) "blunder_opp" else "great_opp"
+                    botReactionText = curr.bot.dialogueFor(reactEvent, newUcis.size, san = reviewed.san)
+                    voiceCoach?.speakBot(botReactionText, currentSettings, bot = curr.bot)
+                }
+                _uiState.update { latest ->
+                    if (latest.gameId != gameIdSnapshot || moveIdx >= latest.moveQualities.size) {
+                        latest
+                    } else {
+                        val nextQualities = latest.moveQualities.toMutableList().apply { set(moveIdx, reviewed.quality) }
+                        val nextExplanations = latest.moveExplanations.toMutableList().apply { set(moveIdx, reviewed.coachExplanation) }
+                        val nextReviewed = (latest.reviewedMoves.filterNot { it.ply == reviewed.ply } + reviewed).sortedBy { it.ply }
+                        latest.copy(
+                            moveQualities = nextQualities,
+                            moveExplanations = nextExplanations,
+                            reviewedMoves = nextReviewed,
+                            botDialogueText = botReactionText ?: latest.botDialogueText,
+                            coachMessage = "${reviewed.quality.symbol} ${reviewed.quality.label}: ${reviewed.coachExplanation}",
+                        )
+                    }
+                }
+            }
         }
 
         if (status.isTerminal) {
@@ -628,9 +730,9 @@ class LocalGameViewModel(
         }
         val headers = mapOf(
             "Event" to when (curr.mode) {
-                PlayMode.VS_BOT -> "ChessHub vs ${curr.bot.name}"
+                PlayMode.VS_BOT -> "Gamebit vs ${curr.bot.name}"
                 PlayMode.BOT_VS_BOT -> "${curr.bot.name} vs ${curr.botBlack.name}"
-                PlayMode.PASS_AND_PLAY -> "ChessHub Over The Board"
+                PlayMode.PASS_AND_PLAY -> "Gamebit Over The Board"
             },
             "White" to whiteName,
             "Black" to blackName,
@@ -643,14 +745,21 @@ class LocalGameViewModel(
         return PgnParser.exportPgn(rootNode, headers, resultStr)
     }
 
-    private fun saveFinishedGameToArchive() {
+    fun saveGameSnapshotManually() {
+        saveFinishedGameToArchive(forceSave = true)
+    }
+
+    private fun saveFinishedGameToArchive(forceSave: Boolean = false) {
         val curr = _uiState.value
-        if (curr.savedToArchive || curr.moveHistorySan.isEmpty()) return
+        if (curr.moveHistorySan.isEmpty()) return
+        if (curr.savedToArchive && !forceSave) return
         val resultStr = when {
+            !curr.gameStatus.isTerminal -> "*"
             curr.winner == PieceColor.WHITE -> "1-0"
             curr.winner == PieceColor.BLACK -> "0-1"
             else -> "1/2-1/2"
         }
+        val gameIdSnapshot = curr.gameId
         val entity = LocalGameEntity(
             id = curr.gameId,
             whiteName = when (curr.mode) {
@@ -670,7 +779,7 @@ class LocalGameViewModel(
                 PlayMode.PASS_AND_PLAY -> 1500
             },
             result = resultStr,
-            resultReason = curr.gameStatus.description,
+            resultReason = if (curr.gameStatus.isTerminal) curr.gameStatus.description else "In Progress",
             variant = curr.variant.displayName,
             timeControl = curr.timeControl.label,
             mode = curr.mode.name.lowercase(),
@@ -680,9 +789,58 @@ class LocalGameViewModel(
             finalFen = curr.boardState.toFen(),
             pgn = exportCurrentPgn(),
         )
+        _uiState.update { it.copy(isGeneratingSummary = curr.gameStatus.isTerminal && curr.postGameSummary == null) }
         viewModelScope.launch {
-            localRepo.saveGame(entity)
-            _uiState.update { it.copy(savedToArchive = true) }
+            var deltaResult = curr.lastEloDelta
+            if (!forceSave && curr.gameStatus.isTerminal && curr.mode == PlayMode.VS_BOT &&
+                curr.ratedGame && curr.moveHistorySan.size >= 4 && settingsRepo != null && deltaResult == null
+            ) {
+                val score = when (curr.winner) {
+                    curr.humanColor -> 1.0
+                    null -> 0.5
+                    else -> 0.0
+                }
+                val stats = settingsRepo.recordLocalGameRating(
+                    category = curr.timeControl.category,
+                    opponentRating = curr.bot.approxElo,
+                    score = score,
+                )
+                deltaResult = RatingDeltaResult(
+                    oldRating = stats.previousRating,
+                    newRating = stats.rating,
+                    delta = stats.lastDelta,
+                    ratedGame = true,
+                    category = curr.timeControl.category,
+                )
+            }
+
+            val report = curr.postGameSummary ?: if (curr.gameStatus.isTerminal) {
+                ChessEngine(currentSettings.lowMemoryMode).reviewGame(
+                    initialState = rootNode.state,
+                    moves = curr.moveHistoryMoves,
+                    useOpeningBook = currentSettings.openingBookEnabled,
+                )
+            } else null
+
+            localRepo.saveGame(
+                entity.copy(
+                    whiteAccuracy = report?.whiteAccuracy,
+                    blackAccuracy = report?.blackAccuracy,
+                ),
+            )
+            _uiState.update { latest ->
+                if (latest.gameId != gameIdSnapshot) latest
+                else latest.copy(
+                    savedToArchive = true,
+                    lastEloDelta = deltaResult ?: latest.lastEloDelta,
+                    postGameSummary = report ?: latest.postGameSummary,
+                    reviewedMoves = report?.moves ?: latest.reviewedMoves,
+                    moveQualities = report?.moves?.map { it.quality } ?: latest.moveQualities,
+                    moveExplanations = report?.moves?.map { it.coachExplanation } ?: latest.moveExplanations,
+                    isGeneratingSummary = false,
+                    coachMessage = if (forceSave) "Game saved to local archive." else latest.coachMessage,
+                )
+            }
         }
     }
 

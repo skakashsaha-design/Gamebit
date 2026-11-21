@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -39,8 +40,8 @@ import androidx.compose.material.icons.filled.School
 import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material.icons.filled.TipsAndUpdates
 import androidx.compose.material.icons.filled.TrendingUp
+import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.Warning
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -87,6 +88,7 @@ import com.example.data.local.PuzzleAttemptEntity
 import com.example.data.local.PuzzlesAndLessonsCatalog
 import com.example.data.local.TacticalPuzzle
 import com.example.ui.components.ChessBoardView
+import com.example.ui.components.GamebitDialog
 import com.example.ui.theme.ChessBoardThemes
 import com.example.viewmodel.CoordinateTrainerState
 import com.example.viewmodel.EndgameTrainerState
@@ -111,6 +113,7 @@ fun LearnScreen(
     onRetryPuzzle: () -> Unit,
     onNextPuzzle: () -> Unit,
     onRevealHint: () -> Unit,
+    onRevealSolution: () -> Unit = {},
     onToggleBookmarkPuzzle: () -> Unit,
     onCreateCustomPuzzle: (String, String, String, Int, String, String, String) -> Boolean,
     onDeleteCustomPuzzle: (String) -> Unit,
@@ -159,6 +162,7 @@ fun LearnScreen(
                 onRetry = onRetryPuzzle,
                 onNext = onNextPuzzle,
                 onHint = onRevealHint,
+                onSolution = onRevealSolution,
                 onToggleBookmark = onToggleBookmarkPuzzle,
                 onCreateCustomPuzzle = onCreateCustomPuzzle,
                 onDeleteCustomPuzzle = onDeleteCustomPuzzle,
@@ -217,6 +221,7 @@ private fun PuzzlesContent(
     onRetry: () -> Unit,
     onNext: () -> Unit,
     onHint: () -> Unit,
+    onSolution: () -> Unit,
     onToggleBookmark: () -> Unit,
     onCreateCustomPuzzle: (String, String, String, Int, String, String, String) -> Boolean,
     onDeleteCustomPuzzle: (String) -> Unit,
@@ -237,8 +242,8 @@ private fun PuzzlesContent(
     }
 
     LazyColumn(
-        modifier = Modifier.fillMaxSize().padding(horizontal = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
+        modifier = Modifier.fillMaxSize().padding(horizontal = 14.dp, vertical = 6.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         item {
             Spacer(Modifier.height(4.dp))
@@ -297,12 +302,12 @@ private fun PuzzlesContent(
             }
         } else {
             item {
-                Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                Box(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp), contentAlignment = Alignment.Center) {
                     ChessBoardView(
                         state = state.boardState,
                         legalMoves = state.legalMoves,
                         theme = boardTheme,
-                        modifier = Modifier.widthIn(max = 500.dp),
+                        modifier = Modifier.widthIn(max = 350.dp),
                         flipped = state.humanColor == PieceColor.BLACK,
                         interactive = !state.solved && !state.failed,
                         allowBothSides = false,
@@ -314,6 +319,7 @@ private fun PuzzlesContent(
                         pieceStyleId = settings.pieceStyleId,
                         moveAnimation = settings.moveAnimation,
                         reducedAnimations = settings.reducedAnimations,
+                        animationMode = settings.animationMode,
                         animationSpeed = settings.animationSpeed,
                         arrows = hintArrows,
                         onMoveSelected = onSubmitMove,
@@ -323,8 +329,8 @@ private fun PuzzlesContent(
 
             item {
                 Surface(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 64.dp),
+                    shape = RoundedCornerShape(12.dp),
                     color = when {
                         state.solved -> MaterialTheme.colorScheme.primaryContainer
                         state.failed -> MaterialTheme.colorScheme.errorContainer
@@ -334,7 +340,7 @@ private fun PuzzlesContent(
                     Text(
                         text = state.feedbackText,
                         style = MaterialTheme.typography.bodyMedium,
-                        modifier = Modifier.padding(12.dp),
+                        modifier = Modifier.padding(14.dp),
                     )
                 }
             }
@@ -342,19 +348,24 @@ private fun PuzzlesContent(
             item {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
                     OutlinedButton(onClick = onHint, modifier = Modifier.weight(1f).testTag("puzzle_hint_btn")) {
                         Icon(Icons.Default.Lightbulb, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(Modifier.width(4.dp))
+                        Spacer(Modifier.width(3.dp))
                         Text("Hint")
+                    }
+                    OutlinedButton(onClick = onSolution, modifier = Modifier.weight(1.1f).testTag("puzzle_solution_btn")) {
+                        Icon(Icons.Default.Visibility, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(3.dp))
+                        Text("Solution")
                     }
                     OutlinedButton(onClick = onRetry, modifier = Modifier.weight(1f).testTag("puzzle_retry_btn")) {
                         Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(Modifier.width(4.dp))
+                        Spacer(Modifier.width(3.dp))
                         Text("Retry")
                     }
-                    Button(onClick = onNext, modifier = Modifier.weight(1f).testTag("puzzle_next_btn")) {
+                    Button(onClick = onNext, modifier = Modifier.weight(0.95f).testTag("puzzle_next_btn")) {
                         Text("Next")
                     }
                 }
@@ -488,23 +499,11 @@ private fun CreateCustomPuzzleDialog(
     var hint by remember { mutableStateOf("") }
     var errorMsg by remember { mutableStateOf<String?>(null) }
 
-    AlertDialog(
+    GamebitDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Create Custom Puzzle") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(value = title, onValueChange = { title = it }, label = { Text("Title") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-                OutlinedTextField(value = fen, onValueChange = { fen = it; errorMsg = null }, label = { Text("FEN Position") }, modifier = Modifier.fillMaxWidth(), maxLines = 2)
-                OutlinedTextField(value = solutionUci, onValueChange = { solutionUci = it; errorMsg = null }, label = { Text("Solution UCI (e.g. d5f7 g8h8)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(value = ratingText, onValueChange = { ratingText = it.filter { c -> c.isDigit() } }, label = { Text("Rating") }, singleLine = true, modifier = Modifier.weight(1f))
-                    OutlinedTextField(value = theme, onValueChange = { theme = it }, label = { Text("Theme") }, singleLine = true, modifier = Modifier.weight(1f))
-                }
-                OutlinedTextField(value = hint, onValueChange = { hint = it }, label = { Text("Hint (optional)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-                errorMsg?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
-            }
-        },
-        confirmButton = {
+        title = "Create Custom Puzzle",
+        actions = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
             Button(onClick = {
                 val ok = onSave(
                     title,
@@ -517,8 +516,17 @@ private fun CreateCustomPuzzleDialog(
                 if (!ok) errorMsg = "Enter a valid FEN and at least one UCI solution move."
             }) { Text("Save Puzzle") }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
-    )
+    ) {
+        OutlinedTextField(value = title, onValueChange = { title = it }, label = { Text("Title") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+        OutlinedTextField(value = fen, onValueChange = { fen = it; errorMsg = null }, label = { Text("FEN Position") }, modifier = Modifier.fillMaxWidth(), maxLines = 2)
+        OutlinedTextField(value = solutionUci, onValueChange = { solutionUci = it; errorMsg = null }, label = { Text("Solution UCI (e.g. d5f7 g8h8)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedTextField(value = ratingText, onValueChange = { ratingText = it.filter { c -> c.isDigit() } }, label = { Text("Rating") }, singleLine = true, modifier = Modifier.weight(1f))
+            OutlinedTextField(value = theme, onValueChange = { theme = it }, label = { Text("Theme") }, singleLine = true, modifier = Modifier.weight(1f))
+        }
+        OutlinedTextField(value = hint, onValueChange = { hint = it }, label = { Text("Hint (optional)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+        errorMsg?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
+    }
 }
 
 @Composable
@@ -571,6 +579,7 @@ private fun OpeningDrillsContent(
                     pieceStyleId = settings.pieceStyleId,
                     moveAnimation = settings.moveAnimation,
                     reducedAnimations = settings.reducedAnimations,
+                    animationMode = settings.animationMode,
                     animationSpeed = settings.animationSpeed,
                     onMoveSelected = onSubmitMove,
                 )
@@ -718,6 +727,7 @@ private fun LessonsContent(
                         pieceStyleId = settings.pieceStyleId,
                         moveAnimation = settings.moveAnimation,
                         reducedAnimations = settings.reducedAnimations,
+                        animationMode = settings.animationMode,
                         animationSpeed = settings.animationSpeed,
                         onMoveSelected = { move ->
                             if (move.uci == step.expectedMoveUci) {
@@ -824,12 +834,12 @@ private fun EndgamesContent(
         }
 
         item {
-            Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+            Box(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp), contentAlignment = Alignment.Center) {
                 ChessBoardView(
                     state = state.boardState,
                     legalMoves = state.legalMoves,
                     theme = boardTheme,
-                    modifier = Modifier.widthIn(max = 500.dp),
+                    modifier = Modifier.widthIn(max = 350.dp),
                     flipped = state.humanColor == PieceColor.BLACK,
                     interactive = !state.gameStatus.isTerminal && !state.isBotThinking,
                     allowBothSides = false,
@@ -841,6 +851,7 @@ private fun EndgamesContent(
                     pieceStyleId = settings.pieceStyleId,
                     moveAnimation = settings.moveAnimation,
                     reducedAnimations = settings.reducedAnimations,
+                    animationMode = settings.animationMode,
                     animationSpeed = settings.animationSpeed,
                     lastMove = state.lastMove,
                     arrows = bestArrow,
@@ -1197,6 +1208,7 @@ private fun CoordinateTrainerContent(
                 showCoordinates = false,
                 showLegalMoves = false,
                 pieceStyleId = settings.pieceStyleId,
+                animationMode = settings.animationMode,
                 onSquareTappedRaw = onTapSquare,
             )
         }

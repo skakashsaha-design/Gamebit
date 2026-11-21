@@ -1,6 +1,6 @@
 {
-  "name": "ChessHub",
-  "description": "Independent Android chess ecosystem combining offline play, bots, variants, engine analysis, game review, puzzles, lessons, studies, and online matchmaking.",
+  "name": "Gamebit",
+  "description": "Independent Android chess application combining offline play, bots, variants, engine analysis, game review, puzzles, endgames coach, studies, and modular online play.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

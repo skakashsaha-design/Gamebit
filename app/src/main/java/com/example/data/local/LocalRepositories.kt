@@ -21,6 +21,72 @@ import java.util.UUID
 
 private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "chesshub_prefs")
 
+enum class AnimationMode(val label: String) {
+    FULL("Full"),
+    REDUCED("Reduced"),
+    OFF("Off"),
+}
+
+enum class PerformanceMode(val label: String, val description: String) {
+    HIGH_PERFORMANCE("High Performance", "Max engine depth, Multi-PV, smooth board & graph animations"),
+    BALANCED("Balanced", "Balanced engine depth and responsive animations"),
+    LOW_END_1GB("Low-End 1GB Mode", "Disables heavy animations and caps engine memory/depth for 1GB phones"),
+}
+
+enum class VoiceMode(val label: String) {
+    OFF("Off"),
+    BASIC("Basic"),
+    FULL("Full"),
+}
+
+data class RatingCategoryStats(
+    val rating: Int = 1200,
+    val rd: Double = 250.0,
+    val previousRating: Int = 1200,
+    val peakRating: Int = 1200,
+    val lastDelta: Int = 0,
+    val gamesPlayed: Int = 0,
+    val history: List<Int> = listOf(1200),
+) {
+    companion object {
+        fun encode(stats: RatingCategoryStats): String {
+            val histStr = stats.history.takeLast(24).joinToString(",")
+            return "${stats.rating}|${stats.rd}|${stats.previousRating}|${stats.peakRating}|${stats.lastDelta}|${stats.gamesPlayed}|$histStr"
+        }
+
+        fun decode(raw: String?, fallbackRating: Int = 1200, fallbackRd: Double = 250.0): RatingCategoryStats {
+            if (raw.isNullOrBlank()) {
+                val r = fallbackRating.coerceIn(200, 3200)
+                return RatingCategoryStats(rating = r, rd = fallbackRd, previousRating = r, peakRating = r, history = listOf(r))
+            }
+            val parts = raw.split('|')
+            if (parts.size < 6) {
+                val r = fallbackRating.coerceIn(200, 3200)
+                return RatingCategoryStats(rating = r, rd = fallbackRd, previousRating = r, peakRating = r, history = listOf(r))
+            }
+            val r = (parts[0].toIntOrNull() ?: fallbackRating).coerceIn(200, 3200)
+            val rd = (parts[1].toDoubleOrNull() ?: fallbackRd).coerceIn(30.0, 350.0)
+            val prev = (parts[2].toIntOrNull() ?: r).coerceIn(200, 3200)
+            val peak = (parts[3].toIntOrNull() ?: r).coerceIn(200, 3200)
+            val delta = parts[4].toIntOrNull() ?: 0
+            val games = (parts[5].toIntOrNull() ?: 0).coerceAtLeast(0)
+            val hist = parts.getOrNull(6)?.split(',')
+                ?.mapNotNull { it.toIntOrNull()?.coerceIn(200, 3200) }
+                ?.takeIf { it.isNotEmpty() }
+                ?: listOf(r)
+            return RatingCategoryStats(
+                rating = r,
+                rd = rd,
+                previousRating = prev,
+                peakRating = maxOf(peak, r),
+                lastDelta = delta,
+                gamesPlayed = games,
+                history = hist,
+            )
+        }
+    }
+}
+
 data class StudyChapter(
     val id: String = UUID.randomUUID().toString(),
     val title: String,
@@ -40,11 +106,14 @@ data class AppSettings(
     val showLastMove: Boolean = true,
     val moveAnimation: Boolean = true,
     val reducedAnimations: Boolean = false,
+    val animationMode: AnimationMode = AnimationMode.FULL,
+    val performanceMode: PerformanceMode = PerformanceMode.BALANCED,
     val animationSpeed: Float = 1.0f,
     val lowMemoryMode: Boolean = false,
     val autoQueen: Boolean = false,
     val confirmMoves: Boolean = false,
     val premoveEnabled: Boolean = true,
+    val moveFeedbackEnabled: Boolean = true,
     val soundEnabled: Boolean = true,
     val soundVolume: Float = 0.8f,
     val sfxMove: Boolean = true,
@@ -58,6 +127,8 @@ data class AppSettings(
     val hapticsEnabled: Boolean = true,
     val botVoiceEnabled: Boolean = true,
     val trainerVoiceEnabled: Boolean = true,
+    val voiceMode: VoiceMode = VoiceMode.BASIC,
+    val voiceSpeed: Float = 1.0f,
     val voiceVolume: Float = 0.85f,
     val musicEnabled: Boolean = false,
     val musicVolume: Float = 0.55f,
@@ -88,7 +159,7 @@ data class AppSettings(
     val countryIso: String = "BD",
     val fideFederation: String = "BAN",
     val localAvatarId: String = "king",
-    val localDisplayName: String = "ChessHub Player",
+    val localDisplayName: String = "Gamebit Player",
     val localBio: String = "",
     val hiddenHomeCards: Set<String> = emptySet(),
     val homeCardOrder: List<String> = listOf(
@@ -97,6 +168,11 @@ data class AppSettings(
     ),
     val localPuzzleRating: Int = 1200,
     val localPuzzleRd: Double = 250.0,
+    val localBulletStats: RatingCategoryStats = RatingCategoryStats(),
+    val localBlitzStats: RatingCategoryStats = RatingCategoryStats(),
+    val localRapidStats: RatingCategoryStats = RatingCategoryStats(),
+    val localClassicalStats: RatingCategoryStats = RatingCategoryStats(),
+    val localPuzzleStats: RatingCategoryStats = RatingCategoryStats(),
     val puzzleBestStreak: Int = 0,
     val puzzleBestStorm: Int = 0,
     val favoriteTimeControls: List<String> = listOf("1+0", "3+2", "5+0", "10+0"),
@@ -170,6 +246,16 @@ class SettingsRepository(private val context: Context) {
         val PUZZLE_RD = floatPreferencesKey("puzzle_rd")
         val BEST_STREAK = intPreferencesKey("best_streak")
         val BEST_STORM = intPreferencesKey("best_storm")
+        val ANIMATION_MODE = stringPreferencesKey("animation_mode")
+        val PERFORMANCE_MODE = stringPreferencesKey("performance_mode")
+        val VOICE_MODE = stringPreferencesKey("voice_mode")
+        val VOICE_SPEED = floatPreferencesKey("voice_speed")
+        val MOVE_FEEDBACK = booleanPreferencesKey("move_feedback")
+        val STATS_BULLET = stringPreferencesKey("stats_bullet")
+        val STATS_BLITZ = stringPreferencesKey("stats_blitz")
+        val STATS_RAPID = stringPreferencesKey("stats_rapid")
+        val STATS_CLASSICAL = stringPreferencesKey("stats_classical")
+        val STATS_PUZZLE = stringPreferencesKey("stats_puzzle")
     }
 
     val isDeviceLowRam: Boolean by lazy {
@@ -182,6 +268,25 @@ class SettingsRepository(private val context: Context) {
     val settings: Flow<AppSettings> = context.dataStore.data.map { prefs ->
         val defaultLowMem = isDeviceLowRam
         val lowMem = prefs[Keys.LOW_MEMORY] ?: defaultLowMem
+        val perfMode = prefs[Keys.PERFORMANCE_MODE]?.let { raw ->
+            PerformanceMode.entries.firstOrNull { it.name == raw }
+        } ?: if (lowMem) PerformanceMode.LOW_END_1GB else PerformanceMode.BALANCED
+        val effectiveLowMem = lowMem || perfMode == PerformanceMode.LOW_END_1GB
+        val reducedAnim = prefs[Keys.REDUCED_ANIMATIONS] ?: effectiveLowMem
+        val moveAnim = prefs[Keys.MOVE_ANIMATION] ?: !effectiveLowMem
+        val animMode = prefs[Keys.ANIMATION_MODE]?.let { raw ->
+            AnimationMode.entries.firstOrNull { it.name == raw }
+        } ?: when {
+            !moveAnim -> AnimationMode.OFF
+            reducedAnim -> AnimationMode.REDUCED
+            else -> AnimationMode.FULL
+        }
+        val voiceMode = prefs[Keys.VOICE_MODE]?.let { raw ->
+            VoiceMode.entries.firstOrNull { it.name == raw }
+        } ?: VoiceMode.BASIC
+        val puzzleRatingLegacy = (prefs[Keys.PUZZLE_RATING] ?: 1200).coerceIn(200, 3200)
+        val puzzleRdLegacy = (prefs[Keys.PUZZLE_RD] ?: 250f).toDouble()
+        val puzzleStats = RatingCategoryStats.decode(prefs[Keys.STATS_PUZZLE], puzzleRatingLegacy, puzzleRdLegacy)
         AppSettings(
             darkTheme = prefs[Keys.DARK_THEME] ?: true,
             highContrast = prefs[Keys.HIGH_CONTRAST] ?: false,
@@ -191,13 +296,16 @@ class SettingsRepository(private val context: Context) {
             showCoordinates = prefs[Keys.SHOW_COORDS] ?: true,
             showLegalMoves = prefs[Keys.SHOW_LEGAL] ?: true,
             showLastMove = prefs[Keys.SHOW_LAST_MOVE] ?: true,
-            moveAnimation = prefs[Keys.MOVE_ANIMATION] ?: !lowMem,
-            reducedAnimations = prefs[Keys.REDUCED_ANIMATIONS] ?: lowMem,
+            moveAnimation = animMode != AnimationMode.OFF,
+            reducedAnimations = animMode != AnimationMode.FULL || effectiveLowMem,
+            animationMode = animMode,
+            performanceMode = perfMode,
             animationSpeed = prefs[Keys.ANIMATION_SPEED] ?: 1.0f,
-            lowMemoryMode = lowMem,
+            lowMemoryMode = effectiveLowMem,
             autoQueen = prefs[Keys.AUTO_QUEEN] ?: false,
             confirmMoves = prefs[Keys.CONFIRM_MOVES] ?: false,
             premoveEnabled = prefs[Keys.PREMOVE] ?: true,
+            moveFeedbackEnabled = prefs[Keys.MOVE_FEEDBACK] ?: true,
             soundEnabled = prefs[Keys.SOUND] ?: true,
             soundVolume = prefs[Keys.SOUND_VOL] ?: 0.8f,
             sfxMove = prefs[Keys.SFX_MOVE] ?: true,
@@ -208,24 +316,26 @@ class SettingsRepository(private val context: Context) {
             sfxFeedback = prefs[Keys.SFX_FEEDBACK] ?: true,
             sfxButton = prefs[Keys.SFX_BUTTON] ?: true,
             sfxBookMove = prefs[Keys.SFX_BOOK] ?: true,
-            hapticsEnabled = prefs[Keys.HAPTICS] ?: !lowMem,
-            botVoiceEnabled = prefs[Keys.BOT_VOICE] ?: !lowMem,
+            hapticsEnabled = prefs[Keys.HAPTICS] ?: !effectiveLowMem,
+            botVoiceEnabled = prefs[Keys.BOT_VOICE] ?: !effectiveLowMem,
             trainerVoiceEnabled = prefs[Keys.TRAINER_VOICE] ?: true,
+            voiceMode = voiceMode,
+            voiceSpeed = (prefs[Keys.VOICE_SPEED] ?: 1.0f).coerceIn(0.75f, 1.5f),
             voiceVolume = prefs[Keys.VOICE_VOL] ?: 0.85f,
             musicEnabled = prefs[Keys.MUSIC_ENABLED] ?: false,
             musicVolume = prefs[Keys.MUSIC_VOL] ?: 0.55f,
             musicInMenu = prefs[Keys.MUSIC_MENU] ?: true,
             musicInGame = prefs[Keys.MUSIC_GAME] ?: false,
             musicInTraining = prefs[Keys.MUSIC_TRAIN] ?: true,
-            lowMemoryAudioMode = prefs[Keys.LOW_MEM_AUDIO] ?: lowMem,
+            lowMemoryAudioMode = prefs[Keys.LOW_MEM_AUDIO] ?: effectiveLowMem,
             showEvalBar = prefs[Keys.EVAL_BAR] ?: true,
             showThreatArrow = prefs[Keys.THREAT_ARROW] ?: false,
             showBestMoveArrow = prefs[Keys.BEST_MOVE_ARROW] ?: true,
             allowBoardArrows = prefs[Keys.BOARD_ARROWS] ?: true,
-            engineDepth = prefs[Keys.ENGINE_DEPTH] ?: if (lowMem) 2 else 3,
-            engineMultiPv = prefs[Keys.ENGINE_MULTIPV] ?: if (lowMem) 1 else 3,
+            engineDepth = prefs[Keys.ENGINE_DEPTH] ?: if (effectiveLowMem) 2 else 3,
+            engineMultiPv = prefs[Keys.ENGINE_MULTIPV] ?: if (effectiveLowMem) 1 else 3,
             engineThreads = prefs[Keys.ENGINE_THREADS] ?: 1,
-            engineHashMb = prefs[Keys.ENGINE_HASH_MB] ?: if (lowMem) 8 else 16,
+            engineHashMb = prefs[Keys.ENGINE_HASH_MB] ?: if (effectiveLowMem) 8 else 16,
             openingBookEnabled = prefs[Keys.OPENING_BOOK] ?: true,
             openingRecognitionEnabled = prefs[Keys.OPENING_RECOG] ?: true,
             gambitRecognitionEnabled = prefs[Keys.GAMBIT_RECOG] ?: true,
@@ -241,13 +351,18 @@ class SettingsRepository(private val context: Context) {
             countryIso = prefs[Keys.COUNTRY_ISO] ?: "BD",
             fideFederation = prefs[Keys.FIDE_FED] ?: "BAN",
             localAvatarId = prefs[Keys.LOCAL_AVATAR] ?: "king",
-            localDisplayName = prefs[Keys.LOCAL_NAME] ?: "ChessHub Player",
+            localDisplayName = prefs[Keys.LOCAL_NAME] ?: "Gamebit Player",
             localBio = prefs[Keys.LOCAL_BIO] ?: "",
             hiddenHomeCards = prefs[Keys.HIDDEN_CARDS]?.split(',')?.filter { it.isNotBlank() }?.toSet() ?: emptySet(),
             homeCardOrder = prefs[Keys.CARD_ORDER]?.split(',')?.filter { it.isNotBlank() }
                 ?.takeIf { it.isNotEmpty() } ?: AppSettings().homeCardOrder,
-            localPuzzleRating = prefs[Keys.PUZZLE_RATING] ?: 1200,
-            localPuzzleRd = (prefs[Keys.PUZZLE_RD] ?: 250f).toDouble(),
+            localPuzzleRating = puzzleStats.rating,
+            localPuzzleRd = puzzleStats.rd,
+            localBulletStats = RatingCategoryStats.decode(prefs[Keys.STATS_BULLET]),
+            localBlitzStats = RatingCategoryStats.decode(prefs[Keys.STATS_BLITZ]),
+            localRapidStats = RatingCategoryStats.decode(prefs[Keys.STATS_RAPID]),
+            localClassicalStats = RatingCategoryStats.decode(prefs[Keys.STATS_CLASSICAL]),
+            localPuzzleStats = puzzleStats,
             puzzleBestStreak = prefs[Keys.BEST_STREAK] ?: 0,
             puzzleBestStorm = prefs[Keys.BEST_STORM] ?: 0,
         )
@@ -264,13 +379,69 @@ class SettingsRepository(private val context: Context) {
     suspend fun setShowCoordinates(v: Boolean) = update { it[Keys.SHOW_COORDS] = v }
     suspend fun setShowLegalMoves(v: Boolean) = update { it[Keys.SHOW_LEGAL] = v }
     suspend fun setShowLastMove(v: Boolean) = update { it[Keys.SHOW_LAST_MOVE] = v }
-    suspend fun setMoveAnimation(v: Boolean) = update { it[Keys.MOVE_ANIMATION] = v }
-    suspend fun setReducedAnimations(v: Boolean) = update { it[Keys.REDUCED_ANIMATIONS] = v }
+    suspend fun setMoveAnimation(v: Boolean) = update {
+        it[Keys.MOVE_ANIMATION] = v
+        val currReduced = it[Keys.REDUCED_ANIMATIONS] ?: false
+        it[Keys.ANIMATION_MODE] = when {
+            !v -> AnimationMode.OFF.name
+            currReduced -> AnimationMode.REDUCED.name
+            else -> AnimationMode.FULL.name
+        }
+    }
+    suspend fun setReducedAnimations(v: Boolean) = update {
+        it[Keys.REDUCED_ANIMATIONS] = v
+        val currMove = it[Keys.MOVE_ANIMATION] ?: true
+        it[Keys.ANIMATION_MODE] = when {
+            !currMove -> AnimationMode.OFF.name
+            v -> AnimationMode.REDUCED.name
+            else -> AnimationMode.FULL.name
+        }
+    }
+    suspend fun setAnimationMode(mode: AnimationMode) = update {
+        it[Keys.ANIMATION_MODE] = mode.name
+        it[Keys.MOVE_ANIMATION] = mode != AnimationMode.OFF
+        it[Keys.REDUCED_ANIMATIONS] = mode == AnimationMode.REDUCED
+    }
+    suspend fun setPerformanceMode(mode: PerformanceMode) = update {
+        it[Keys.PERFORMANCE_MODE] = mode.name
+        when (mode) {
+            PerformanceMode.HIGH_PERFORMANCE -> {
+                it[Keys.LOW_MEMORY] = false
+                it[Keys.LOW_MEM_AUDIO] = false
+                it[Keys.ENGINE_DEPTH] = 4
+                it[Keys.ENGINE_MULTIPV] = 3
+                it[Keys.ENGINE_HASH_MB] = 32
+                it[Keys.ANIMATION_MODE] = AnimationMode.FULL.name
+                it[Keys.MOVE_ANIMATION] = true
+                it[Keys.REDUCED_ANIMATIONS] = false
+            }
+            PerformanceMode.BALANCED -> {
+                it[Keys.LOW_MEMORY] = false
+                it[Keys.LOW_MEM_AUDIO] = false
+                it[Keys.ENGINE_DEPTH] = 3
+                it[Keys.ENGINE_MULTIPV] = 3
+                it[Keys.ENGINE_HASH_MB] = 16
+            }
+            PerformanceMode.LOW_END_1GB -> {
+                it[Keys.LOW_MEMORY] = true
+                it[Keys.LOW_MEM_AUDIO] = true
+                it[Keys.REDUCED_ANIMATIONS] = true
+                it[Keys.ANIMATION_MODE] = AnimationMode.REDUCED.name
+                it[Keys.ENGINE_DEPTH] = 2
+                it[Keys.ENGINE_MULTIPV] = 1
+                it[Keys.ENGINE_HASH_MB] = 8
+            }
+        }
+    }
     suspend fun setAnimationSpeed(v: Float) = update { it[Keys.ANIMATION_SPEED] = v.coerceIn(0.5f, 2.0f) }
-    suspend fun setLowMemoryMode(v: Boolean) = update { it[Keys.LOW_MEMORY] = v }
+    suspend fun setLowMemoryMode(v: Boolean) = update {
+        it[Keys.LOW_MEMORY] = v
+        if (v) it[Keys.PERFORMANCE_MODE] = PerformanceMode.LOW_END_1GB.name
+    }
     suspend fun setAutoQueen(v: Boolean) = update { it[Keys.AUTO_QUEEN] = v }
     suspend fun setConfirmMoves(v: Boolean) = update { it[Keys.CONFIRM_MOVES] = v }
     suspend fun setPremoveEnabled(v: Boolean) = update { it[Keys.PREMOVE] = v }
+    suspend fun setMoveFeedbackEnabled(v: Boolean) = update { it[Keys.MOVE_FEEDBACK] = v }
     suspend fun setSoundEnabled(v: Boolean) = update { it[Keys.SOUND] = v }
     suspend fun setSoundVolume(v: Float) = update { it[Keys.SOUND_VOL] = v }
     suspend fun setSfxFlag(category: String, enabled: Boolean) = update {
@@ -288,6 +459,17 @@ class SettingsRepository(private val context: Context) {
     suspend fun setHapticsEnabled(v: Boolean) = update { it[Keys.HAPTICS] = v }
     suspend fun setBotVoiceEnabled(v: Boolean) = update { it[Keys.BOT_VOICE] = v }
     suspend fun setTrainerVoiceEnabled(v: Boolean) = update { it[Keys.TRAINER_VOICE] = v }
+    suspend fun setVoiceMode(mode: VoiceMode) = update {
+        it[Keys.VOICE_MODE] = mode.name
+        if (mode == VoiceMode.OFF) {
+            it[Keys.BOT_VOICE] = false
+            it[Keys.TRAINER_VOICE] = false
+        } else {
+            it[Keys.BOT_VOICE] = true
+            it[Keys.TRAINER_VOICE] = true
+        }
+    }
+    suspend fun setVoiceSpeed(v: Float) = update { it[Keys.VOICE_SPEED] = v.coerceIn(0.75f, 1.5f) }
     suspend fun setVoiceVolume(v: Float) = update { it[Keys.VOICE_VOL] = v.coerceIn(0f, 1f) }
     suspend fun setMusicEnabled(v: Boolean) = update { it[Keys.MUSIC_ENABLED] = v }
     suspend fun setMusicVolume(v: Float) = update { it[Keys.MUSIC_VOL] = v.coerceIn(0f, 1f) }
@@ -321,7 +503,7 @@ class SettingsRepository(private val context: Context) {
     suspend fun setNotificationsEnabled(v: Boolean) = update { it[Keys.NOTIFICATIONS] = v }
     suspend fun setLocalAvatarId(id: String) = update { it[Keys.LOCAL_AVATAR] = id }
     suspend fun setLocalIdentity(name: String, bio: String) = update {
-        it[Keys.LOCAL_NAME] = name.trim().take(36).ifBlank { "ChessHub Player" }
+        it[Keys.LOCAL_NAME] = name.trim().take(36).ifBlank { "Gamebit Player" }
         it[Keys.LOCAL_BIO] = bio.trim().take(240)
     }
     suspend fun setCountryAndFide(countryIso: String, fideFed: String) = update {
@@ -338,19 +520,64 @@ class SettingsRepository(private val context: Context) {
         it[Keys.CARD_ORDER] = order.joinToString(",")
     }
 
+    suspend fun recordLocalGameRating(
+        category: String,
+        opponentRating: Int,
+        score: Double, // 1.0 = win, 0.5 = draw, 0.0 = loss
+    ): RatingCategoryStats {
+        val key = when (category.lowercase()) {
+            "bullet" -> Keys.STATS_BULLET
+            "rapid" -> Keys.STATS_RAPID
+            "classical", "correspondence" -> Keys.STATS_CLASSICAL
+            else -> Keys.STATS_BLITZ
+        }
+        var updatedStats = RatingCategoryStats()
+        update { prefs ->
+            val current = RatingCategoryStats.decode(prefs[key])
+            val updated = Glicko2RatingSystem.updateSingleGame(
+                player = GlickoRating(current.rating.toDouble(), current.rd, 0.06),
+                opponent = GlickoRating(opponentRating.coerceIn(200, 3200).toDouble(), 110.0, 0.06),
+                score = score,
+            )
+            val newRating = updated.displayInt.coerceIn(200, 3200)
+            updatedStats = RatingCategoryStats(
+                rating = newRating,
+                rd = updated.rd,
+                previousRating = current.rating,
+                peakRating = maxOf(current.peakRating, newRating),
+                lastDelta = newRating - current.rating,
+                gamesPlayed = current.gamesPlayed + 1,
+                history = (current.history + newRating).takeLast(24),
+            )
+            prefs[key] = RatingCategoryStats.encode(updatedStats)
+        }
+        return updatedStats
+    }
+
     suspend fun recordPuzzleResult(puzzleRating: Int, solved: Boolean, streakNow: Int = 0, stormNow: Int = 0): Int {
         var newRatingInt = 1200
         update { prefs ->
-            val currR = (prefs[Keys.PUZZLE_RATING] ?: 1200).toDouble()
-            val currRd = (prefs[Keys.PUZZLE_RD] ?: 250f).toDouble()
+            val legacyR = (prefs[Keys.PUZZLE_RATING] ?: 1200).coerceIn(200, 3200)
+            val legacyRd = (prefs[Keys.PUZZLE_RD] ?: 250f).toDouble()
+            val current = RatingCategoryStats.decode(prefs[Keys.STATS_PUZZLE], legacyR, legacyRd)
             val updated = Glicko2RatingSystem.updateSingleGame(
-                player = GlickoRating(currR, currRd, 0.06),
-                opponent = GlickoRating(puzzleRating.toDouble(), 80.0, 0.06),
+                player = GlickoRating(current.rating.toDouble(), current.rd, 0.06),
+                opponent = GlickoRating(puzzleRating.coerceIn(200, 3200).toDouble(), 80.0, 0.06),
                 score = if (solved) 1.0 else 0.0,
             )
-            newRatingInt = updated.displayInt
+            newRatingInt = updated.displayInt.coerceIn(200, 3200)
+            val updatedStats = RatingCategoryStats(
+                rating = newRatingInt,
+                rd = updated.rd,
+                previousRating = current.rating,
+                peakRating = maxOf(current.peakRating, newRatingInt),
+                lastDelta = newRatingInt - current.rating,
+                gamesPlayed = current.gamesPlayed + 1,
+                history = (current.history + newRatingInt).takeLast(24),
+            )
             prefs[Keys.PUZZLE_RATING] = newRatingInt
             prefs[Keys.PUZZLE_RD] = updated.rd.toFloat()
+            prefs[Keys.STATS_PUZZLE] = RatingCategoryStats.encode(updatedStats)
             val bestStreak = prefs[Keys.BEST_STREAK] ?: 0
             if (streakNow > bestStreak) prefs[Keys.BEST_STREAK] = streakNow
             val bestStorm = prefs[Keys.BEST_STORM] ?: 0

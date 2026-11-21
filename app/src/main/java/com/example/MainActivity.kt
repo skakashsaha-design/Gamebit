@@ -60,6 +60,7 @@ import com.example.auth.AuthState
 import com.example.auth.HttpAuthRepository
 import com.example.chess.ChessBoardState
 import com.example.chess.ChessVariant
+import com.example.data.local.AnimationMode
 import com.example.data.local.AppSettings
 import com.example.data.local.ChessHubDatabase
 import com.example.data.local.CollectionEntity
@@ -71,6 +72,7 @@ import com.example.data.remote.ExternalPlayerSummary
 import com.example.data.remote.ExternalTvChannel
 import com.example.data.remote.RemoteChessHubOnlineRepository
 import com.example.data.remote.WebSocketConnectionState
+import com.example.ui.components.GamebitSplashScreen
 import com.example.ui.screens.AnalyzeScreen
 import com.example.ui.screens.AuthScreen
 import com.example.ui.screens.ChessNewsScreen
@@ -184,6 +186,7 @@ fun ChessHubRoot(
     val defaultServerUrl by authRepo.serverBaseUrl.collectAsStateWithLifecycle()
 
     var forceOffline by remember { mutableStateOf(false) }
+    var showSplash by remember { mutableStateOf(true) }
     var isSigningIn by remember { mutableStateOf(false) }
     var authError by remember { mutableStateOf<String?>(null) }
     val rootScope = rememberCoroutineScope()
@@ -201,77 +204,86 @@ fun ChessHubRoot(
             dynamicColor = settings.dynamicColor,
             fontScale = settings.fontScale,
         ) {
-            when (authMode) {
-                AppAuthMode.Pending -> {
-                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        CircularProgressIndicator()
+            if (showSplash) {
+                GamebitSplashScreen(
+                    reducedAnimations = settings.reducedAnimations ||
+                        settings.lowMemoryMode ||
+                        settings.animationMode != AnimationMode.FULL,
+                    onFinished = { showSplash = false },
+                )
+            } else {
+                when (authMode) {
+                    AppAuthMode.Pending -> {
+                        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            CircularProgressIndicator()
+                        }
                     }
-                }
-                AppAuthMode.Unauthenticated -> {
-                    AuthScreen(
-                        isSigningIn = isSigningIn,
-                        defaultServerUrl = defaultServerUrl,
-                        errorMessage = authError,
-                        onSignInClick = { serverUrl, identifier, password ->
-                            isSigningIn = true
-                            authError = null
-                            rootScope.launch {
-                                authRepo.signInWithCredentials(serverUrl, identifier, password)
-                                    .onSuccess {
+                    AppAuthMode.Unauthenticated -> {
+                        AuthScreen(
+                            isSigningIn = isSigningIn,
+                            defaultServerUrl = defaultServerUrl,
+                            errorMessage = authError,
+                            onSignInClick = { serverUrl, identifier, password ->
+                                isSigningIn = true
+                                authError = null
+                                rootScope.launch {
+                                    authRepo.signInWithCredentials(serverUrl, identifier, password)
+                                        .onSuccess {
+                                            isSigningIn = false
+                                            forceOffline = false
+                                        }
+                                        .onFailure { err ->
+                                            isSigningIn = false
+                                            authError = err.localizedMessage ?: "Sign in failed"
+                                        }
+                                }
+                            },
+                            onRegisterClick = { serverUrl, username, email, password ->
+                                isSigningIn = true
+                                authError = null
+                                rootScope.launch {
+                                    authRepo.registerAccount(
+                                        serverUrl = serverUrl,
+                                        username = username,
+                                        email = email,
+                                        password = password,
+                                        countryIso = settings.countryIso,
+                                        fideFederation = settings.fideFederation,
+                                    ).onSuccess {
                                         isSigningIn = false
                                         forceOffline = false
-                                    }
-                                    .onFailure { err ->
+                                    }.onFailure { err ->
                                         isSigningIn = false
-                                        authError = err.localizedMessage ?: "Sign in failed"
+                                        authError = err.localizedMessage ?: "Registration failed"
                                     }
-                            }
-                        },
-                        onRegisterClick = { serverUrl, username, email, password ->
-                            isSigningIn = true
-                            authError = null
-                            rootScope.launch {
-                                authRepo.registerAccount(
-                                    serverUrl = serverUrl,
-                                    username = username,
-                                    email = email,
-                                    password = password,
-                                    countryIso = settings.countryIso,
-                                    fideFederation = settings.fideFederation,
-                                ).onSuccess {
-                                    isSigningIn = false
-                                    forceOffline = false
-                                }.onFailure { err ->
-                                    isSigningIn = false
-                                    authError = err.localizedMessage ?: "Registration failed"
                                 }
-                            }
-                        },
-                        onContinueOfflineClick = { forceOffline = true },
-                    )
-                }
-                AppAuthMode.OfflineGuest -> {
-                    ChessHubMainShell(
-                        isOnline = false,
-                        onlineSession = null,
-                        settings = settings,
-                        settingsRepo = settingsRepo,
-                        localRepo = localRepo,
-                        soundManager = soundManager,
-                        voiceCoach = voiceCoach,
-                        musicManager = musicManager,
-                        externalApis = externalApis,
-                        incomingPayload = incomingPayload,
-                        onConsumeIncomingPayload = onConsumeIncomingPayload,
-                        onSwitchToOnlineSignIn = { forceOffline = false },
-                        onSignOut = { forceOffline = false },
-                    )
-                }
-                is AppAuthMode.Authenticated -> {
-                    key(authMode.session.user.uid) {
+                            },
+                            onGoogleSignInClick = { serverUrl, idToken, displayNameHint ->
+                                isSigningIn = true
+                                authError = null
+                                rootScope.launch {
+                                    authRepo.signInWithGoogle(
+                                        serverUrl = serverUrl,
+                                        idToken = idToken,
+                                        displayNameHint = displayNameHint,
+                                        countryIso = settings.countryIso,
+                                        fideFederation = settings.fideFederation,
+                                    ).onSuccess {
+                                        isSigningIn = false
+                                        forceOffline = false
+                                    }.onFailure { err ->
+                                        isSigningIn = false
+                                        authError = err.localizedMessage ?: "Google sign-in failed"
+                                    }
+                                }
+                            },
+                            onContinueOfflineClick = { forceOffline = true },
+                        )
+                    }
+                    AppAuthMode.OfflineGuest -> {
                         ChessHubMainShell(
-                            isOnline = true,
-                            onlineSession = authMode.session,
+                            isOnline = false,
+                            onlineSession = null,
                             settings = settings,
                             settingsRepo = settingsRepo,
                             localRepo = localRepo,
@@ -282,13 +294,37 @@ fun ChessHubRoot(
                             incomingPayload = incomingPayload,
                             onConsumeIncomingPayload = onConsumeIncomingPayload,
                             onSwitchToOnlineSignIn = { forceOffline = false },
-                            onSignOut = {
-                                rootScope.launch {
-                                    authRepo.signOut()
-                                    forceOffline = false
-                                }
-                            },
+                            onSignOut = { forceOffline = false },
                         )
+                    }
+                    is AppAuthMode.Authenticated -> {
+                        key(authMode.session.user.uid) {
+                            ChessHubMainShell(
+                                isOnline = true,
+                                onlineSession = authMode.session,
+                                settings = settings,
+                                settingsRepo = settingsRepo,
+                                localRepo = localRepo,
+                                soundManager = soundManager,
+                                voiceCoach = voiceCoach,
+                                musicManager = musicManager,
+                                externalApis = externalApis,
+                                incomingPayload = incomingPayload,
+                                onConsumeIncomingPayload = onConsumeIncomingPayload,
+                                onSwitchToOnlineSignIn = { forceOffline = false },
+                                onSignOut = {
+                                    rootScope.launch {
+                                        authRepo.signOut()
+                                        forceOffline = false
+                                    }
+                                },
+                                onDeleteAccount = {
+                                    authRepo.deleteAccount().onSuccess {
+                                        forceOffline = false
+                                    }
+                                },
+                            )
+                        }
                     }
                 }
             }
@@ -311,13 +347,14 @@ private fun ChessHubMainShell(
     onConsumeIncomingPayload: () -> Unit,
     onSwitchToOnlineSignIn: () -> Unit,
     onSignOut: () -> Unit,
+    onDeleteAccount: suspend () -> Result<Unit> = { Result.success(Unit) },
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
 
     val localGameVm: LocalGameViewModel = viewModel(
-        factory = simpleVmFactory { LocalGameViewModel(localRepo, soundManager, voiceCoach) },
+        factory = simpleVmFactory { LocalGameViewModel(localRepo, soundManager, voiceCoach, settingsRepo) },
     )
     val analysisVm: AnalysisAndReviewViewModel = viewModel(
         factory = simpleVmFactory { AnalysisAndReviewViewModel(localRepo, externalApis) },
@@ -537,6 +574,11 @@ private fun ChessHubMainShell(
                     snackbarHostState.showSnackbar("Cleared cached chess news articles")
                 }
             },
+            onAnimationModeChange = { scope.launch { settingsRepo.setAnimationMode(it) } },
+            onPerformanceModeChange = { scope.launch { settingsRepo.setPerformanceMode(it) } },
+            onVoiceModeChange = { scope.launch { settingsRepo.setVoiceMode(it) } },
+            onVoiceSpeedChange = { scope.launch { settingsRepo.setVoiceSpeed(it) } },
+            onMoveFeedbackChange = { scope.launch { settingsRepo.setMoveFeedbackEnabled(it) } },
         )
         return
     }
@@ -695,6 +737,13 @@ private fun ChessHubMainShell(
                                     }
                                 }
                             },
+                            onToggleRatedGame = { localGameVm.toggleRatedGame(it) },
+                            onToggleMoveFeedback = { scope.launch { settingsRepo.setMoveFeedbackEnabled(it) } },
+                            onSaveGameSnapshot = {
+                                localGameVm.saveGameSnapshotManually()
+                                scope.launch { snackbarHostState.showSnackbar("Saved game snapshot to Archive") }
+                            },
+                            onSpeakBotDialogue = { localGameVm.speakCurrentBotDialogue() },
                         )
                         2 -> LearnScreen(
                             settings = settings,
@@ -712,6 +761,7 @@ private fun ChessHubMainShell(
                             onRetryPuzzle = { trainingVm.retryPuzzle() },
                             onNextPuzzle = { trainingVm.nextPuzzle() },
                             onRevealHint = { trainingVm.revealHint() },
+                            onRevealSolution = { trainingVm.revealPuzzleSolution() },
                             onToggleBookmarkPuzzle = { trainingVm.toggleBookmarkCurrentPuzzle() },
                             onCreateCustomPuzzle = { title, fen, sol, rating, theme, hint, exp ->
                                 trainingVm.createCustomPuzzle(title, fen, sol, rating, theme, hint, exp)
@@ -806,6 +856,8 @@ private fun ChessHubMainShell(
                                 selectedTab = 1
                             },
                             onShareText = ::shareText,
+                            onStopEngine = { analysisVm.stopEngine() },
+                            onSetAutoplaySpeed = { analysisVm.setAutoplaySpeed(it) },
                         )
                         else -> CommunityHubScreen(
                             isOnline = isOnline,
@@ -893,6 +945,13 @@ private fun ChessHubMainShell(
                                 if (analysisVm.importPgn(pgn)) selectedTab = 3
                             },
                             onSignOut = onSignOut,
+                            onDeleteAccount = {
+                                scope.launch {
+                                    onDeleteAccount().onFailure { err ->
+                                        snackbarHostState.showSnackbar(err.localizedMessage ?: "Delete account failed")
+                                    }
+                                }
+                            },
                             savedGames = savedGames,
                             onOpenSavedGame = { game ->
                                 analysisVm.loadSavedGame(game)

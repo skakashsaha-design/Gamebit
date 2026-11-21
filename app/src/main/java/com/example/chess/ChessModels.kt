@@ -200,6 +200,35 @@ data class CastlingRights(
     }
 }
 
+enum class BotVoiceStyle(val label: String) {
+    WARM("Warm"),
+    PLAYFUL("Playful"),
+    CASUAL("Casual"),
+    SHARP("Sharp"),
+    CALM("Calm"),
+    FIERY("Fiery"),
+    STOIC("Stoic"),
+    ANALYTICAL("Analytical"),
+    GRANDMASTER("Grandmaster"),
+    SYNTHETIC("Synthetic"),
+}
+
+data class BotVoiceProfile(
+    val pitch: Float = 1.0f,
+    val rate: Float = 1.0f,
+    val timbreSlot: Int = 0,
+    val voiceStyle: BotVoiceStyle = BotVoiceStyle.CASUAL,
+    val preferredLocaleTag: String = "en-US",
+)
+
+data class BotAvatarSpec(
+    val primaryHex: Long = 0xFF1E293B,
+    val secondaryHex: Long = 0xFF0F172A,
+    val accentHex: Long = 0xFF10B981,
+    val emblemStyle: String = "classic",
+    val badgePiece: PieceType = PieceType.KNIGHT,
+)
+
 data class BotProfile(
     val id: String,
     val name: String,
@@ -212,46 +241,205 @@ data class BotProfile(
     val styleTag: String,
     val bio: String,
     val preferredOpeningEco: String,
+    val voiceProfile: BotVoiceProfile = BotVoiceProfile(),
+    val avatarSpec: BotAvatarSpec = BotAvatarSpec(),
 ) {
-    fun dialogueFor(event: String, moveCount: Int): String = when (event) {
-        "start" -> when {
-            approxElo < 800 -> "Hi! I'm $name ($approxStrengthLabel). Let's have a fun relaxed game!"
-            approxElo < 1800 -> "Good luck! I'll stick to my $styleTag plans ($preferredOpeningEco)."
-            else -> "$name ready. Expect sharp calculation and disciplined $styleTag pressure."
+    fun dialogueFor(
+        event: String,
+        moveCount: Int,
+        san: String? = null,
+        openingName: String? = null,
+        capturedPiece: PieceType? = null,
+    ): String = when (event) {
+        "start" -> when (voiceProfile.voiceStyle) {
+            BotVoiceStyle.WARM -> "Hey! I'm $name ($approxStrengthLabel). Take your time and let's enjoy some chess!"
+            BotVoiceStyle.PLAYFUL -> "Yo, $name here! Ready for wild tactics and surprises?"
+            BotVoiceStyle.SHARP -> "$name online. Watch every diagonal—I'm hunting for forks from move one!"
+            BotVoiceStyle.CALM -> "Greetings, I am $name. Let's build a clean strategic battle ($preferredOpeningEco)."
+            BotVoiceStyle.FIERY -> "$name stepping up! Don't blink—I love launching storms against the king!"
+            BotVoiceStyle.STOIC -> "$name here. Patience and structure decide games."
+            BotVoiceStyle.ANALYTICAL -> "I'm $name. Let's test concrete calculation and deep positional nuances."
+            BotVoiceStyle.GRANDMASTER -> "$name at the board. Precision and timing will decide everything today."
+            BotVoiceStyle.SYNTHETIC -> "Apex-CH initialized. Depth prioritized. Calculating optimal continuations."
+            BotVoiceStyle.CASUAL -> "Hi! I'm $name ($approxStrengthLabel). Let's play a crisp, fun match!"
         }
-        "capture" -> when (styleTag) {
-            "Aggressive", "Sharp" -> "Keeping the tension high—let's see how you defend!"
-            "Endgame" -> "Simplifying toward a favorable endgame structure."
-            else -> "Fair trade! Staying focused on piece activity."
+        "opening" -> when (voiceProfile.voiceStyle) {
+            BotVoiceStyle.FIERY -> "${openingName ?: preferredOpeningEco}! Love this sharp battleground—time to attack."
+            BotVoiceStyle.CALM, BotVoiceStyle.STOIC -> "Ah, the ${openingName ?: preferredOpeningEco}. Solid ground for maneuvering."
+            BotVoiceStyle.SYNTHETIC -> "Opening signature detected: ${openingName ?: preferredOpeningEco}. Book lines aligned."
+            else -> "Classic ${openingName ?: preferredOpeningEco}! Let's see who handles the middlegame plan better."
         }
-        "check" -> "Check! Guard your king carefully."
-        "blunder_opp" -> "Hmm, that square looked tempting—let's test it!"
-        "win" -> "Good game! Want to run Game Review together to inspect key moments?"
-        "lose" -> "Well played! You broke through my defense cleanly."
-        else -> if (moveCount < 8) "Developing my pieces toward the center." else "Calculating candidate continuations..."
+        "capture" -> {
+            val pieceWord = capturedPiece?.name?.lowercase() ?: "piece"
+            when (voiceProfile.voiceStyle) {
+                BotVoiceStyle.PLAYFUL -> "Ooh, snatching that $pieceWord cleanly!"
+                BotVoiceStyle.FIERY -> "Taking your $pieceWord (${san ?: "capture"}) and keeping the initiative!"
+                BotVoiceStyle.STOIC, BotVoiceStyle.CALM -> "Trading the $pieceWord off to clarify the structure."
+                BotVoiceStyle.SYNTHETIC -> "Material gain verified on ${san ?: "capture"}. Advantage updated."
+                else -> "Clean exchange—let's see what opens up next."
+            }
+        }
+        "check" -> when (voiceProfile.voiceStyle) {
+            BotVoiceStyle.FIERY, BotVoiceStyle.SHARP -> "Check with ${san ?: "tempo"}! Nowhere comfortable to hide!"
+            BotVoiceStyle.SYNTHETIC -> "Forcing check delivered: ${san ?: "move"}. King safety compromised."
+            BotVoiceStyle.WARM, BotVoiceStyle.CASUAL -> "Check! Better tuck your king somewhere safe."
+            else -> "Check (${san ?: "tempo"}). Let's test your defensive accuracy."
+        }
+        "castled" -> when (voiceProfile.voiceStyle) {
+            BotVoiceStyle.CALM, BotVoiceStyle.STOIC -> "King tucked away safely. Now the real middlegame begins."
+            BotVoiceStyle.FIERY -> "Castling first, launching pawns next!"
+            else -> "King is safe—time to connect the rooks."
+        }
+        "promotion" -> when (voiceProfile.voiceStyle) {
+            BotVoiceStyle.SYNTHETIC -> "Pawn promotion executed: ${san ?: "new piece"}. Heavy firepower online."
+            else -> "A brand-new piece enters the board! Things just got intense."
+        }
+        "endgame" -> when (voiceProfile.voiceStyle) {
+            BotVoiceStyle.STOIC, BotVoiceStyle.ANALYTICAL -> "Endgame reached. King activity and passed pawns rule from here."
+            else -> "Queens off, endgame on! Every single tempo matters now."
+        }
+        "blunder_opp" -> when (voiceProfile.voiceStyle) {
+            BotVoiceStyle.PLAYFUL -> "Wait—did you really mean to leave that square open?!"
+            BotVoiceStyle.SHARP, BotVoiceStyle.FIERY -> "Aha! That slip gives me a real tactical shot!"
+            BotVoiceStyle.SYNTHETIC -> "Tactical inaccuracy detected. Converting advantage."
+            BotVoiceStyle.WARM -> "Careful there! Let me show you why that square is tricky."
+            else -> "Hmm, that move left a soft spot—let's test it!"
+        }
+        "great_opp" -> when (voiceProfile.voiceStyle) {
+            BotVoiceStyle.WARM, BotVoiceStyle.CASUAL -> "Whoa, brilliant move! That caught me off guard!"
+            BotVoiceStyle.GRANDMASTER -> "Impressive find—that puts serious pressure on my position."
+            BotVoiceStyle.SYNTHETIC -> "High-precision candidate found by opponent. Adjusting search."
+            else -> "Sharp play! You spotted a strong resource there."
+        }
+        "win" -> when (voiceProfile.voiceStyle) {
+            BotVoiceStyle.WARM -> "Good game! Tap Game Review if you want to explore the turning points together."
+            BotVoiceStyle.SYNTHETIC -> "Match concluded. Run Game Review for full accuracy telemetry."
+            else -> "Well fought! Check the Evaluation Graph to see where the tide turned."
+        }
+        "lose" -> when (voiceProfile.voiceStyle) {
+            BotVoiceStyle.FIERY -> "Respect! You out-tacticked me fair and square—rematch?"
+            BotVoiceStyle.SYNTHETIC -> "Defeat logged. Your accuracy outperformed current depth."
+            else -> "Well played! You broke through cleanly—great technique."
+        }
+        "draw" -> "Balanced fight! A hard-earned draw by both sides."
+        else -> when {
+            moveCount < 10 -> "Developing toward central control and king safety."
+            voiceProfile.voiceStyle == BotVoiceStyle.SYNTHETIC -> "Evaluating candidate lines at depth $searchDepth."
+            else -> "Scanning tactics and improving my worst-placed piece..."
+        }
     }
 }
 
 object ChessHubBots {
     val ALL = listOf(
-        BotProfile("bot_sprout", "Nadia", "Approx. 250 Bot", 250, 1, 240, 0.8f, 0.9f, "Beginner", "Learns alongside you and frequently leaves tactical chances.", "A00"),
-        BotProfile("bot_novice", "Leo", "Approx. 450 Bot", 450, 1, 180, 0.95f, 0.8f, "Novice", "Likes early queen sorties and captures hanging pawns.", "B00"),
-        BotProfile("bot_tempo", "Tariq", "Approx. 650 Bot", 650, 1, 130, 1.0f, 0.7f, "Casual", "Loves developing knights early and trading pieces.", "C20"),
-        BotProfile("bot_improver", "Maya", "Approx. 850 Bot", 850, 1, 100, 1.05f, 0.6f, "Improver", "Castles early and follows basic central development.", "C50"),
-        BotProfile("bot_club", "Sadia", "Approx. 1050 Bot", 1050, 2, 75, 1.1f, 0.5f, "Tactical", "Spots basic forks, skewers, and back-rank mates reliably.", "C44"),
-        BotProfile("bot_tactical", "Victor", "Approx. 1220 Bot", 1220, 2, 55, 1.2f, 0.42f, "Tactical", "Enjoys open files and double attacks on unguarded targets.", "B21"),
-        BotProfile("bot_positional", "Henrik", "Approx. 1400 Bot", 1400, 2, 35, 0.9f, 0.35f, "Positional", "Solid center control, London System and Queen's Gambit specialist.", "D02"),
-        BotProfile("bot_solid", "Elena", "Approx. 1550 Bot", 1550, 2, 26, 0.92f, 0.30f, "Defensive", "Patient Slav and Caro-Kann defender who punishes overextension.", "B10"),
-        BotProfile("bot_sharpshooter", "Mateo", "Approx. 1750 Bot", 1750, 3, 18, 1.3f, 0.25f, "Aggressive", "Pushes kingside attacks, Evans Gambit, and sharp Sicilian lines.", "B90"),
-        BotProfile("bot_sharp", "Sofia", "Approx. 1900 Bot", 1900, 3, 14, 1.28f, 0.22f, "Sharp", "Plays imbalanced Benoni and King's Indian counterattacks.", "E60"),
-        BotProfile("bot_defender", "Kenji", "Approx. 1980 Bot", 1980, 3, 10, 0.85f, 0.20f, "Defensive", "Neutralizes gambits with accurate consolidation.", "D30"),
-        BotProfile("bot_balanced", "Clara", "Approx. 2050 Bot", 2050, 3, 8, 1.02f, 0.18f, "Balanced", "Classical Ruy Lopez & Catalan player balancing strategy and tactics.", "E00"),
-        BotProfile("bot_master", "Aarav", "Approx. 2150 Bot", 2150, 4, 6, 1.12f, 0.15f, "Master", "Deep calculation and disciplined positional squeezing.", "C88"),
-        BotProfile("bot_endgame", "Soren", "Approx. 2250 Bot", 2250, 4, 4, 0.95f, 0.12f, "Endgame", "Relentlessly trades into favorable rook and pawn endings.", "D37"),
-        BotProfile("bot_im", "Ananya", "Approx. 2450 Bot", 2450, 4, 3, 1.10f, 0.10f, "Master", "International Master style tactical precision and theory.", "B96"),
-        BotProfile("bot_gm", "Vikram", "Approx. 2650 Bot", 2650, 4, 1, 1.15f, 0.08f, "Grandmaster", "Combines dynamic sacrifices with rock-solid structure.", "C89"),
-        BotProfile("bot_supergm", "Ren", "Approx. 2850 Bot", 2850, 5, 0, 1.08f, 0.06f, "Grandmaster", "Relentless initiative and razor-sharp multi-move tactics.", "C78"),
-        BotProfile("bot_apex", "Apex-CH", "Approx. 3000 Bot", 3000, 5, 0, 1.05f, 0.03f, "Engine", "Maximum local Kotlin alpha-beta depth with minimal randomness.", "E90"),
+        BotProfile(
+            "bot_sprout", "Nadia", "Approx. 250 Bot", 250, 1, 240, 0.8f, 0.9f, "Beginner",
+            "Learns alongside you and frequently leaves tactical chances.", "A00",
+            BotVoiceProfile(pitch = 1.20f, rate = 0.95f, timbreSlot = 1, voiceStyle = BotVoiceStyle.WARM, preferredLocaleTag = "en-US"),
+            BotAvatarSpec(0xFF065F46, 0xFF064E3B, 0xFF34D399, "sprout", PieceType.PAWN),
+        ),
+        BotProfile(
+            "bot_novice", "Leo", "Approx. 450 Bot", 450, 1, 180, 0.95f, 0.8f, "Novice",
+            "Likes early queen sorties and captures hanging pawns.", "B00",
+            BotVoiceProfile(pitch = 1.12f, rate = 1.09f, timbreSlot = 0, voiceStyle = BotVoiceStyle.PLAYFUL, preferredLocaleTag = "en-AU"),
+            BotAvatarSpec(0xFFB45309, 0xFF78350F, 0xFFFBBF24, "sparks", PieceType.QUEEN),
+        ),
+        BotProfile(
+            "bot_tempo", "Tariq", "Approx. 650 Bot", 650, 1, 130, 1.0f, 0.7f, "Casual",
+            "Loves developing knights early and trading pieces.", "C20",
+            BotVoiceProfile(pitch = 0.96f, rate = 1.02f, timbreSlot = 2, voiceStyle = BotVoiceStyle.CASUAL, preferredLocaleTag = "en-GB"),
+            BotAvatarSpec(0xFF0369A1, 0xFF0C4A6E, 0xFF38BDF8, "helm", PieceType.KNIGHT),
+        ),
+        BotProfile(
+            "bot_improver", "Maya", "Approx. 850 Bot", 850, 1, 100, 1.05f, 0.6f, "Improver",
+            "Castles early and follows basic central development.", "C50",
+            BotVoiceProfile(pitch = 1.16f, rate = 1.03f, timbreSlot = 3, voiceStyle = BotVoiceStyle.WARM, preferredLocaleTag = "en-IN"),
+            BotAvatarSpec(0xFF6D28D9, 0xFF4C1D95, 0xFFC084FC, "aurora", PieceType.BISHOP),
+        ),
+        BotProfile(
+            "bot_club", "Sadia", "Approx. 1050 Bot", 1050, 2, 75, 1.1f, 0.5f, "Tactical",
+            "Spots basic forks, skewers, and back-rank mates reliably.", "C44",
+            BotVoiceProfile(pitch = 1.10f, rate = 1.07f, timbreSlot = 5, voiceStyle = BotVoiceStyle.SHARP, preferredLocaleTag = "en-IN"),
+            BotAvatarSpec(0xFFBE185D, 0xFF831843, 0xFFF472B6, "tiara", PieceType.KNIGHT),
+        ),
+        BotProfile(
+            "bot_tactical", "Victor", "Approx. 1220 Bot", 1220, 2, 55, 1.2f, 0.42f, "Tactical",
+            "Enjoys open files and double attacks on unguarded targets.", "B21",
+            BotVoiceProfile(pitch = 0.87f, rate = 1.06f, timbreSlot = 4, voiceStyle = BotVoiceStyle.SHARP, preferredLocaleTag = "en-US"),
+            BotAvatarSpec(0xFF991B1B, 0xFF7F1D1D, 0xFFF87171, "bolt", PieceType.ROOK),
+        ),
+        BotProfile(
+            "bot_positional", "Henrik", "Approx. 1400 Bot", 1400, 2, 35, 0.9f, 0.35f, "Positional",
+            "Solid center control, London System and Queen's Gambit specialist.", "D02",
+            BotVoiceProfile(pitch = 0.83f, rate = 0.92f, timbreSlot = 6, voiceStyle = BotVoiceStyle.CALM, preferredLocaleTag = "en-GB"),
+            BotAvatarSpec(0xFF1E3A8A, 0xFF172554, 0xFF60A5FA, "glasses", PieceType.BISHOP),
+        ),
+        BotProfile(
+            "bot_solid", "Elena", "Approx. 1550 Bot", 1550, 2, 26, 0.92f, 0.30f, "Defensive",
+            "Patient Slav and Caro-Kann defender who punishes overextension.", "B10",
+            BotVoiceProfile(pitch = 1.07f, rate = 0.94f, timbreSlot = 7, voiceStyle = BotVoiceStyle.CALM, preferredLocaleTag = "en-GB"),
+            BotAvatarSpec(0xFF0F766E, 0xFF134E4A, 0xFF2DD4BF, "shield", PieceType.ROOK),
+        ),
+        BotProfile(
+            "bot_sharpshooter", "Mateo", "Approx. 1750 Bot", 1750, 3, 18, 1.3f, 0.25f, "Aggressive",
+            "Pushes kingside attacks, Evans Gambit, and sharp Sicilian lines.", "B90",
+            BotVoiceProfile(pitch = 1.01f, rate = 1.16f, timbreSlot = 8, voiceStyle = BotVoiceStyle.FIERY, preferredLocaleTag = "en-US"),
+            BotAvatarSpec(0xFFC2410C, 0xFF7C2D12, 0xFFFB923C, "flame", PieceType.KNIGHT),
+        ),
+        BotProfile(
+            "bot_sharp", "Sofia", "Approx. 1900 Bot", 1900, 3, 14, 1.28f, 0.22f, "Sharp",
+            "Plays imbalanced Benoni and King's Indian counterattacks.", "E60",
+            BotVoiceProfile(pitch = 1.15f, rate = 1.12f, timbreSlot = 9, voiceStyle = BotVoiceStyle.FIERY, preferredLocaleTag = "en-AU"),
+            BotAvatarSpec(0xFFA21CAF, 0xFF701A75, 0xFFE879F9, "diamond", PieceType.QUEEN),
+        ),
+        BotProfile(
+            "bot_defender", "Kenji", "Approx. 1980 Bot", 1980, 3, 10, 0.85f, 0.20f, "Defensive",
+            "Neutralizes gambits with accurate consolidation.", "D30",
+            BotVoiceProfile(pitch = 0.84f, rate = 0.90f, timbreSlot = 10, voiceStyle = BotVoiceStyle.STOIC, preferredLocaleTag = "en-US"),
+            BotAvatarSpec(0xFF334155, 0xFF0F172A, 0xFF94A3B8, "kabuto", PieceType.ROOK),
+        ),
+        BotProfile(
+            "bot_balanced", "Clara", "Approx. 2050 Bot", 2050, 3, 8, 1.02f, 0.18f, "Balanced",
+            "Classical Ruy Lopez & Catalan player balancing strategy and tactics.", "E00",
+            BotVoiceProfile(pitch = 1.05f, rate = 0.98f, timbreSlot = 11, voiceStyle = BotVoiceStyle.ANALYTICAL, preferredLocaleTag = "en-GB"),
+            BotAvatarSpec(0xFF4338CA, 0xFF312E81, 0xFFA5B4FC, "laurel", PieceType.QUEEN),
+        ),
+        BotProfile(
+            "bot_master", "Aarav", "Approx. 2150 Bot", 2150, 4, 6, 1.12f, 0.15f, "Master",
+            "Deep calculation and disciplined positional squeezing.", "C88",
+            BotVoiceProfile(pitch = 0.90f, rate = 0.96f, timbreSlot = 12, voiceStyle = BotVoiceStyle.ANALYTICAL, preferredLocaleTag = "en-IN"),
+            BotAvatarSpec(0xFF047857, 0xFF064E3B, 0xFF10B981, "monocle", PieceType.BISHOP),
+        ),
+        BotProfile(
+            "bot_endgame", "Soren", "Approx. 2250 Bot", 2250, 4, 4, 0.95f, 0.12f, "Endgame",
+            "Relentlessly trades into favorable rook and pawn endings.", "D37",
+            BotVoiceProfile(pitch = 0.80f, rate = 0.88f, timbreSlot = 13, voiceStyle = BotVoiceStyle.STOIC, preferredLocaleTag = "en-GB"),
+            BotAvatarSpec(0xFF3F3F46, 0xFF18181B, 0xFFE4E4E7, "hood", PieceType.KING),
+        ),
+        BotProfile(
+            "bot_im", "Ananya", "Approx. 2450 Bot", 2450, 4, 3, 1.10f, 0.10f, "Master",
+            "International Master style tactical precision and theory.", "B96",
+            BotVoiceProfile(pitch = 1.09f, rate = 1.02f, timbreSlot = 14, voiceStyle = BotVoiceStyle.GRANDMASTER, preferredLocaleTag = "en-IN"),
+            BotAvatarSpec(0xFF0E7490, 0xFF164E63, 0xFF22D3EE, "crown", PieceType.QUEEN),
+        ),
+        BotProfile(
+            "bot_gm", "Vikram", "Approx. 2650 Bot", 2650, 4, 1, 1.15f, 0.08f, "Grandmaster",
+            "Combines dynamic sacrifices with rock-solid structure.", "C89",
+            BotVoiceProfile(pitch = 0.85f, rate = 0.97f, timbreSlot = 15, voiceStyle = BotVoiceStyle.GRANDMASTER, preferredLocaleTag = "en-IN"),
+            BotAvatarSpec(0xFF92400E, 0xFF451A03, 0xFFF59E0B, "crown", PieceType.KING),
+        ),
+        BotProfile(
+            "bot_supergm", "Ren", "Approx. 2850 Bot", 2850, 5, 0, 1.08f, 0.06f, "Grandmaster",
+            "Relentless initiative and razor-sharp multi-move tactics.", "C78",
+            BotVoiceProfile(pitch = 0.93f, rate = 1.06f, timbreSlot = 16, voiceStyle = BotVoiceStyle.GRANDMASTER, preferredLocaleTag = "en-US"),
+            BotAvatarSpec(0xFF7F1D1D, 0xFF450A0A, 0xFFFCA5A5, "laurel", PieceType.KING),
+        ),
+        BotProfile(
+            "bot_apex", "Apex-CH", "Approx. 3000 Bot", 3000, 5, 0, 1.05f, 0.03f, "Engine",
+            "Maximum local Kotlin alpha-beta depth with minimal randomness.", "E90",
+            BotVoiceProfile(pitch = 0.76f, rate = 1.18f, timbreSlot = 17, voiceStyle = BotVoiceStyle.SYNTHETIC, preferredLocaleTag = "en-US"),
+            BotAvatarSpec(0xFF0F172A, 0xFF020617, 0xFF06B6D4, "cyber", PieceType.KING),
+        ),
     )
 }
 

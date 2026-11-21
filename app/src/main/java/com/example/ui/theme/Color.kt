@@ -47,12 +47,15 @@ val SkyLightContainer = Color(0xFFE0F2FE)
 val SkyLightOnContainer = Color(0xFF0C4A6E)
 
 // Move Classification Semantic Colors
-val EvalBest = Color(0xFF10B981)
 val EvalBrilliant = Color(0xFF06B6D4)
+val EvalGreat = Color(0xFF38BDF8)
+val EvalBest = Color(0xFF10B981)
 val EvalGood = Color(0xFF84CC16)
 val EvalBook = Color(0xFFA855F7)
+val EvalForced = Color(0xFF94A3B8)
 val EvalInaccuracy = Color(0xFFF59E0B)
 val EvalMistake = Color(0xFFF97316)
+val EvalMiss = Color(0xFFF43F5E)
 val EvalBlunder = Color(0xFFEF4444)
 
 data class BoardThemeColors(

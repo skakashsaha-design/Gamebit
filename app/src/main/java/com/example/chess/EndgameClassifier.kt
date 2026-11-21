@@ -71,6 +71,14 @@ object EndgameClassifier {
             return EndgameClassification("Queen vs Rook Endgame", "Major pieces (${wq}Q+${wr}R vs ${bq}Q+${br}R)")
         }
 
+        if (totalQueens > 0 && totalRooks == 0 && totalMinors > 0) {
+            return EndgameClassification("Queen vs Minor Piece", "Queen & Minor piece endgame (${wq}Q+${wb + wn}M vs ${bq}Q+${bb + bn}M)")
+        }
+
+        if (totalQueens > 0 && totalRooks > 0 && totalMinors > 0) {
+            return EndgameClassification("Queen vs Rook Endgame", "Complex major/minor endgame (${wq}Q+${wr}R vs ${bq}Q+${br}R)")
+        }
+
         if (totalQueens > 0 && totalRooks == 0 && totalMinors == 0) {
             return EndgameClassification("Queen Endgame", "Queen & Pawn endgame (${wq}Q vs ${bq}Q)")
         }
@@ -97,6 +105,6 @@ object EndgameClassifier {
             return EndgameClassification("Knight Endgame", "Knight & Pawn (${wn}N vs ${bn}N)")
         }
 
-        return EndgameClassification("Theoretical Endgame", "Reduced material technical endgame")
+        return EndgameClassification("Theoretical Draw", "Reduced material balanced endgame")
     }
 }

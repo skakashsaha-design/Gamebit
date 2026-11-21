@@ -22,9 +22,9 @@ class ExampleRobolectricTest {
     val composeRule = createAndroidComposeRule<MainActivity>()
 
     @Test
-    fun `app name matches ChessHub`() {
+    fun `app name matches Gamebit`() {
         val context = ApplicationProvider.getApplicationContext<Context>()
-        assertEquals("ChessHub", context.getString(R.string.app_name))
+        assertEquals("Gamebit", context.getString(R.string.app_name))
     }
 
     @Test

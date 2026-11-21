@@ -43,6 +43,14 @@ internal data class AuthRegisterPayload(
 )
 
 @JsonClass(generateAdapter = true)
+internal data class AuthGooglePayload(
+    val idToken: String,
+    val displayName: String? = null,
+    val countryIso: String = "BD",
+    val fideFederation: String = "BAN",
+)
+
+@JsonClass(generateAdapter = true)
 internal data class AuthUserPayload(
     val userId: String? = null,
     val uid: String? = null,
@@ -100,6 +108,14 @@ sealed interface AuthState {
     data class Authenticated(val session: AuthSession) : AuthState
 }
 
+interface GoogleAuthProvider {
+    suspend fun signInWithGoogleIdToken(
+        serverUrl: String,
+        idToken: String,
+        displayNameHint: String? = null,
+    ): Result<AuthSession>
+}
+
 interface AuthRepository {
     val authState: StateFlow<AuthState>
     val serverBaseUrl: StateFlow<String>
@@ -120,10 +136,20 @@ interface AuthRepository {
         fideFederation: String,
     ): Result<AuthSession>
 
+    suspend fun signInWithGoogle(
+        serverUrl: String,
+        idToken: String,
+        displayNameHint: String? = null,
+        countryIso: String = "BD",
+        fideFederation: String = "BAN",
+    ): Result<AuthSession>
+
     suspend fun signInWithToken(
         serverUrl: String,
         accessToken: String,
     ): Result<AuthSession>
+
+    suspend fun deleteAccount(): Result<Unit>
 
     suspend fun signOut()
 
@@ -149,7 +175,7 @@ class HttpAuthRepository(
     context: Context,
     private val okHttpClient: OkHttpClient = defaultAuthOkHttpClient(),
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
-) : AuthRepository {
+) : AuthRepository, GoogleAuthProvider {
     private val appContext = context.applicationContext
     private val scope = CoroutineScope(SupervisorJob() + ioDispatcher)
 
@@ -295,7 +321,7 @@ class HttpAuthRepository(
                 }
             } catch (io: IOException) {
                 throw IllegalStateException(
-                    "Unable to reach ChessHub server at $normalizedUrl (${io.localizedMessage ?: "network error"}). Check your connection or Continue Offline.",
+                    "Unable to reach Gamebit server at $normalizedUrl (${io.localizedMessage ?: "network error"}). Check your connection or Continue Offline.",
                     io,
                 )
             }
@@ -324,6 +350,65 @@ class HttpAuthRepository(
             persistSession(session)
             _authState.value = AuthState.Authenticated(session)
             session
+        }
+    }
+
+    override suspend fun signInWithGoogleIdToken(
+        serverUrl: String,
+        idToken: String,
+        displayNameHint: String?,
+    ): Result<AuthSession> = signInWithGoogle(
+        serverUrl = serverUrl,
+        idToken = idToken,
+        displayNameHint = displayNameHint,
+    )
+
+    override suspend fun signInWithGoogle(
+        serverUrl: String,
+        idToken: String,
+        displayNameHint: String?,
+        countryIso: String,
+        fideFederation: String,
+    ): Result<AuthSession> = withContext(ioDispatcher) {
+        runCatching {
+            val normalizedUrl = updateServerUrl(serverUrl)
+            val cleanToken = idToken.trim()
+            require(cleanToken.isNotBlank()) { "Google OAuth token is required. Configure Google Sign-In client or sign in with credentials." }
+            val payloadJson = authMoshi.adapter(AuthGooglePayload::class.java).toJson(
+                AuthGooglePayload(
+                    idToken = cleanToken,
+                    displayName = displayNameHint?.trim()?.takeIf { it.isNotBlank() },
+                    countryIso = countryIso,
+                    fideFederation = fideFederation,
+                ),
+            )
+            val session = executeAuthPost("$normalizedUrl/v1/auth/google", payloadJson, normalizedUrl)
+            persistSession(session)
+            _authState.value = AuthState.Authenticated(session)
+            session
+        }
+    }
+
+    override suspend fun deleteAccount(): Result<Unit> = withContext(ioDispatcher) {
+        runCatching {
+            val current = (_authState.value as? AuthState.Authenticated)?.session
+            if (current != null) {
+                val req = Request.Builder()
+                    .url("${current.serverUrl}/v1/auth/me")
+                    .header("Authorization", "Bearer ${current.accessToken}")
+                    .delete()
+                    .build()
+                runCatching {
+                    okHttpClient.newCall(req).execute().use { resp ->
+                        if (!resp.isSuccessful && resp.code != 404) {
+                            val body = resp.body?.string().orEmpty()
+                            throw IllegalStateException(parseServerError(body, resp.code, current.serverUrl))
+                        }
+                    }
+                }
+            }
+            clearStoredSession()
+            _authState.value = AuthState.Unauthenticated
         }
     }
 
@@ -366,7 +451,7 @@ class HttpAuthRepository(
             }
         } catch (io: IOException) {
             throw IllegalStateException(
-                "Unable to reach ChessHub server at $serverUrl (${io.localizedMessage ?: "connection failed"}). Check your server URL or Continue Offline.",
+                "Unable to reach Gamebit server at $serverUrl (${io.localizedMessage ?: "connection failed"}). Check your server URL or Continue Offline.",
                 io,
             )
         }

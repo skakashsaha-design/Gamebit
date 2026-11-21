@@ -22,6 +22,6 @@ dependencyResolutionManagement {
   }
 }
 
-rootProject.name = "ChessHub"
+rootProject.name = "Gamebit"
 
 include(":app")

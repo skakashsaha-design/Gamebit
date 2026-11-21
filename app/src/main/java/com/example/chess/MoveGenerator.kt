@@ -41,8 +41,12 @@ object MoveGenerator {
                     }
                 }
                 ChessVariant.RACING_KINGS -> {
-                    // Neither king may be in check after a move
-                    if (!isKingInCheck(next, state.sideToMove) && !isKingInCheck(next, state.sideToMove.opposite)) {
+                    // Neither king may ever be placed under attack after any move in Racing Kings
+                    val ownKing = findKingSquare(next, state.sideToMove)
+                    val oppKing = findKingSquare(next, state.sideToMove.opposite)
+                    val ownAttacked = ownKing != null && isSquareAttacked(next, ownKing, state.sideToMove.opposite)
+                    val oppAttacked = oppKing != null && isSquareAttacked(next, oppKing, state.sideToMove)
+                    if (!ownAttacked && !oppAttacked) {
                         legal.add(move)
                     }
                 }
@@ -428,8 +432,39 @@ object MoveGenerator {
         return null
     }
 
+    fun hasLegalEnPassantCapture(state: ChessBoardState): Boolean {
+        val ep = state.enPassantSquare ?: return false
+        val side = state.sideToMove
+        val pawnRank = if (side == PieceColor.WHITE) ep.rank - 1 else ep.rank + 1
+        if (pawnRank !in 0..7) return false
+        for (df in intArrayOf(-1, 1)) {
+            val f = ep.file + df
+            if (f in 0..7 && state.pieceAt(f, pawnRank) == Piece(PieceType.PAWN, side)) {
+                val epMove = Move(Square.of(f, pawnRank), ep, isEnPassant = true)
+                val next = applyMoveUnchecked(state, epMove)
+                val valid = when (state.variant) {
+                    ChessVariant.ANTICHESS -> true
+                    ChessVariant.ATOMIC -> {
+                        val ownKing = findKingSquare(next, side)
+                        val oppKing = findKingSquare(next, side.opposite)
+                        ownKing != null && (oppKing == null || (!kingsAdjacent(ownKing, oppKing) && !isSquareAttacked(next, ownKing, side.opposite)))
+                    }
+                    ChessVariant.RACING_KINGS -> false
+                    else -> !isKingInCheck(next, side)
+                }
+                if (valid) return true
+            }
+        }
+        return false
+    }
+
     fun isKingInCheck(state: ChessBoardState, color: PieceColor): Boolean {
+        if (state.variant == ChessVariant.ANTICHESS || state.variant == ChessVariant.RACING_KINGS) return false
         val kingSq = findKingSquare(state, color) ?: return false
+        if (state.variant == ChessVariant.ATOMIC) {
+            val oppKing = findKingSquare(state, color.opposite) ?: return false
+            if (kingsAdjacent(kingSq, oppKing)) return false
+        }
         return isSquareAttacked(state, kingSq, color.opposite)
     }
 
@@ -570,7 +605,14 @@ object MoveGenerator {
                         GameStatus.STALEMATE to null
                     }
                 }
-                ChessVariant.RACING_KINGS -> GameStatus.STALEMATE to null
+                ChessVariant.RACING_KINGS -> {
+                    val wk = findKingSquare(state, PieceColor.WHITE)
+                    if (wk != null && wk.rank == 7 && state.sideToMove == PieceColor.BLACK) {
+                        GameStatus.VARIANT_WIN to PieceColor.WHITE
+                    } else {
+                        GameStatus.STALEMATE to null
+                    }
+                }
                 else -> {
                     if (isKingInCheck(state, state.sideToMove)) {
                         GameStatus.CHECKMATE to state.sideToMove.opposite
@@ -587,7 +629,13 @@ object MoveGenerator {
         if (reps >= 3) return GameStatus.THREEFOLD_REPETITION to null
         if (state.halfMoveClock >= 100) return GameStatus.FIFTY_MOVE_RULE to null
 
-        if (state.variant == ChessVariant.STANDARD || state.variant == ChessVariant.CHESS960) {
+        if (state.variant in listOf(
+                ChessVariant.STANDARD,
+                ChessVariant.CHESS960,
+                ChessVariant.THREE_CHECK,
+                ChessVariant.ATOMIC,
+            )
+        ) {
             if (isInsufficientMaterial(state)) return GameStatus.INSUFFICIENT_MATERIAL to null
         }
 
@@ -611,14 +659,20 @@ object MoveGenerator {
             }
         }
 
-        if (whiteMinors.isEmpty() && blackMinors.isEmpty()) return true
-        if (whiteMinors.size <= 1 && blackMinors.isEmpty()) return true
-        if (blackMinors.size <= 1 && whiteMinors.isEmpty()) return true
-        if (whiteMinors.size == 1 && blackMinors.size == 1 &&
-            whiteMinors[0].first == PieceType.BISHOP &&
-            blackMinors[0].first == PieceType.BISHOP &&
-            whiteMinors[0].second == blackMinors[0].second
-        ) return true
+        val totalMinors = whiteMinors.size + blackMinors.size
+        if (state.variant == ChessVariant.THREE_CHECK || state.variant == ChessVariant.ATOMIC) {
+            // In Three-Check or Atomic, K vs K is dead; any knight/bishop can deliver 3 checks or force atomic play
+            return totalMinors == 0
+        }
+
+        if (totalMinors <= 1) return true // K vs K, K+B vs K, K+N vs K
+
+        // FIDE Article 5.2.2: No knights, and ALL bishops on board share the same square color -> dead position
+        val allMinors = whiteMinors + blackMinors
+        if (allMinors.all { it.first == PieceType.BISHOP }) {
+            val firstColor = allMinors.first().second
+            if (allMinors.all { it.second == firstColor }) return true
+        }
         return false
     }
 

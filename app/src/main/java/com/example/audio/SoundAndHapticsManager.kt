@@ -8,6 +8,7 @@ import android.os.Build
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
+import com.example.chess.MoveQuality
 import com.example.data.local.AppSettings
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -43,6 +44,32 @@ class SoundAndHapticsManager(context: Context) {
         } else {
             @Suppress("DEPRECATION")
             appContext.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
+        }
+    }
+
+    fun playQualityFeedback(quality: MoveQuality, settings: AppSettings) {
+        if (!settings.moveFeedbackEnabled || !settings.soundEnabled || !settings.sfxFeedback || settings.soundVolume <= 0.02f) {
+            return
+        }
+        val (freq, durationMs, gain) = when (quality) {
+            MoveQuality.BRILLIANT -> Triple(840.0, 95, 0.34)
+            MoveQuality.GREAT -> Triple(760.0, 80, 0.30)
+            MoveQuality.BEST -> Triple(660.0, 60, 0.24)
+            MoveQuality.EXCELLENT -> Triple(600.0, 50, 0.20)
+            MoveQuality.GOOD -> Triple(520.0, 45, 0.16)
+            MoveQuality.BOOK -> Triple(585.0, 65, 0.22)
+            MoveQuality.FORCED -> Triple(430.0, 42, 0.16)
+            MoveQuality.INACCURACY -> Triple(310.0, 70, 0.24)
+            MoveQuality.MISTAKE -> Triple(235.0, 85, 0.28)
+            MoveQuality.MISS -> Triple(210.0, 95, 0.28)
+            MoveQuality.BLUNDER -> Triple(160.0, 120, 0.32)
+        }
+        scope.launch {
+            playRawPcmTone(
+                freq = freq,
+                durationMs = durationMs,
+                volume = (settings.soundVolume * gain.toFloat() * 1.6f).coerceIn(0.05f, 1f),
+            )
         }
     }
 
@@ -108,29 +135,33 @@ class SoundAndHapticsManager(context: Context) {
     }
 
     private fun playTone(type: ChessSoundType, volume: Float) {
+        val durationMs = when (type) {
+            ChessSoundType.GAME_END -> 190
+            ChessSoundType.CHECK -> 110
+            ChessSoundType.BOOK_MOVE, ChessSoundType.FEEDBACK -> 85
+            ChessSoundType.BUTTON -> 32
+            else -> 55
+        }
+        val freq = when (type) {
+            ChessSoundType.MOVE -> 340.0
+            ChessSoundType.CAPTURE -> 230.0
+            ChessSoundType.CHECK -> 620.0
+            ChessSoundType.CASTLE -> 410.0
+            ChessSoundType.PROMOTION -> 740.0
+            ChessSoundType.GAME_END -> 520.0
+            ChessSoundType.ERROR -> 150.0
+            ChessSoundType.BUTTON -> 480.0
+            ChessSoundType.BOOK_MOVE -> 585.0
+            ChessSoundType.FEEDBACK -> 660.0
+        }
+        playRawPcmTone(freq, durationMs, volume)
+    }
+
+    private fun playRawPcmTone(freq: Double, durationMs: Int, volume: Float) {
         runCatching {
             val sampleRate = 22050
-            val durationMs = when (type) {
-                ChessSoundType.GAME_END -> 190
-                ChessSoundType.CHECK -> 110
-                ChessSoundType.BOOK_MOVE, ChessSoundType.FEEDBACK -> 85
-                ChessSoundType.BUTTON -> 32
-                else -> 55
-            }
             val numSamples = (sampleRate * durationMs) / 1000
             val samples = ShortArray(numSamples)
-            val freq = when (type) {
-                ChessSoundType.MOVE -> 340.0
-                ChessSoundType.CAPTURE -> 230.0
-                ChessSoundType.CHECK -> 620.0
-                ChessSoundType.CASTLE -> 410.0
-                ChessSoundType.PROMOTION -> 740.0
-                ChessSoundType.GAME_END -> 520.0
-                ChessSoundType.ERROR -> 150.0
-                ChessSoundType.BUTTON -> 480.0
-                ChessSoundType.BOOK_MOVE -> 585.0
-                ChessSoundType.FEEDBACK -> 660.0
-            }
 
             for (i in 0 until numSamples) {
                 val t = i.toDouble() / sampleRate

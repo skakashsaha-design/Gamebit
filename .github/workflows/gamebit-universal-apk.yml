@@ -1,4 +1,4 @@
-name: ChessHub Universal APK CI
+name: Gamebit Universal APK CI
 
 on:
   push:
@@ -6,6 +6,12 @@ on:
       - '**'
   pull_request:
   workflow_dispatch:
+    inputs:
+      clean_build:
+        description: 'Force clean rebuild with no Gradle build cache'
+        required: false
+        default: true
+        type: boolean
 
 permissions:
   contents: read
@@ -17,21 +23,21 @@ concurrency:
 jobs:
 
   # ============================================================
-  # BUILD APK
+  # BUILD FRESH UNIVERSAL DEBUG APK
   # ============================================================
   build-universal-apk:
-    name: Build Universal Debug APK
+    name: Build Fresh Universal Debug APK
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up JDK 17
+      - name: Set up JDK 21
         uses: actions/setup-java@v5
         with:
           distribution: temurin
-          java-version: '17'
+          java-version: '21'
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v4
@@ -46,24 +52,24 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '9.3.1'
+          cache-disabled: true
 
-      # Keep the existing debug signing configuration working.
+      # Keep the existing debugConfig signing configuration working cleanly.
       - name: Create debug keystore
         shell: bash
         working-directory: ${{ github.workspace }}
         run: |
-          if [ ! -f "$GITHUB_WORKSPACE/debug.keystore" ]; then
-            keytool -genkeypair \
-              -v \
-              -keystore "$GITHUB_WORKSPACE/debug.keystore" \
-              -storepass android \
-              -alias androiddebugkey \
-              -keypass android \
-              -keyalg RSA \
-              -keysize 2048 \
-              -validity 10000 \
-              -dname "CN=Android Debug,O=Android,C=US"
-          fi
+          rm -f "$GITHUB_WORKSPACE/debug.keystore"
+          keytool -genkeypair \
+            -v \
+            -keystore "$GITHUB_WORKSPACE/debug.keystore" \
+            -storepass android \
+            -alias androiddebugkey \
+            -keypass android \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 10000 \
+            -dname "CN=Android Debug,O=Android,C=US"
 
           test -f "$GITHUB_WORKSPACE/debug.keystore"
 
@@ -80,28 +86,34 @@ jobs:
             touch .env
           fi
 
-      - name: Build Universal Debug APK
+      - name: Build Fresh Universal Debug APK
+        shell: bash
         run: |
-          gradle :app:assembleDebug \
-            --no-daemon \
-            --stacktrace \
+          set -euo pipefail
+          SHORT_SHA="${GITHUB_SHA::7}"
+          VERSION_CODE="${GITHUB_RUN_NUMBER}"
+          VERSION_NAME="2.0.0-r${GITHUB_RUN_NUMBER}.${GITHUB_RUN_ATTEMPT}-${SHORT_SHA}"
+
+          rm -rf app/build/outputs/apk artifacts
+
+          GRADLE_FLAGS="--no-daemon --no-build-cache --rerun-tasks --stacktrace"
+          gradle :app:clean :app:assembleDebug \
+            $GRADLE_FLAGS \
+            -PappVersionCode="$VERSION_CODE" \
+            -PappVersionName="$VERSION_NAME" \
             -Dorg.gradle.workers.max=2 \
             "-Dorg.gradle.jvmargs=-Xmx3072m -XX:MaxMetaspaceSize=768m -Dfile.encoding=UTF-8"
 
       - name: Verify APK exists
         shell: bash
         run: |
-          set -e
-
+          set -euo pipefail
           APK="app/build/outputs/apk/debug/app-debug.apk"
-
           if [ ! -f "$APK" ]; then
             echo "ERROR: APK was not created."
             find app/build/outputs -type f -maxdepth 6 || true
             exit 1
           fi
-
-          echo "APK successfully created:"
           ls -lh "$APK"
 
       - name: Verify APK signature
@@ -110,23 +122,46 @@ jobs:
             --verbose \
             app/build/outputs/apk/debug/app-debug.apk
 
-      - name: Copy APK with clear filename
+      - name: Package APK & Publish Build Summary
+        shell: bash
         run: |
+          set -euo pipefail
+          SHORT_SHA="${GITHUB_SHA::7}"
+          APK_NAME="Gamebit-v2.0.0-run${GITHUB_RUN_NUMBER}-a${GITHUB_RUN_ATTEMPT}-${SHORT_SHA}.apk"
           mkdir -p artifacts
-          cp app/build/outputs/apk/debug/app-debug.apk \
-            artifacts/ChessHub-debug.apk
+          cp app/build/outputs/apk/debug/app-debug.apk "artifacts/${APK_NAME}"
 
-      - name: Upload APK artifact
+          SHA256="$(sha256sum "artifacts/${APK_NAME}" | awk '{print $1}')"
+          SIZE_BYTES="$(stat -c%s "artifacts/${APK_NAME}")"
+          COMMIT_MSG="$(git log -1 --pretty=%s)"
+          BUILD_UTC="$(date -u +'%Y-%m-%d %H:%M:%S UTC')"
+
+          {
+            echo "## Gamebit Fresh Debug APK"
+            echo ""
+            echo "| Field | Value |"
+            echo "|---|---|"
+            echo "| **APK File** | \`${APK_NAME}\` |"
+            echo "| **Version** | \`2.0.0-r${GITHUB_RUN_NUMBER}.${GITHUB_RUN_ATTEMPT}-${SHORT_SHA}\` (code \`${GITHUB_RUN_NUMBER}\`) |"
+            echo "| **Commit** | \`${SHORT_SHA}\` — ${COMMIT_MSG} |"
+            echo "| **Built At** | ${BUILD_UTC} |"
+            echo "| **Size** | ${SIZE_BYTES} bytes |"
+            echo "| **SHA-256** | \`${SHA256}\` |"
+            echo ""
+            echo "> **Note:** Use **Run workflow** on a branch to build the newest commit. Clicking **Re-run all jobs** rebuilds that specific run's commit cleanly with zero build cache."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload Fresh APK Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ChessHub-Universal-Debug-APK
-          path: artifacts/ChessHub-debug.apk
+          name: Gamebit-Debug-APK-run${{ github.run_number }}-attempt${{ github.run_attempt }}
+          path: artifacts/*.apk
           if-no-files-found: error
           retention-days: 14
 
 
   # ============================================================
-  # UNIT + ROBOLECTRIC + LINT
+  # UNIT + ROBOLECTRIC + ANDROID LINT
   # ============================================================
   test-and-lint:
     name: Unit + Robolectric Tests + Lint
@@ -136,8 +171,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # IMPORTANT:
-      # Robolectric + Android API 36 should run on JDK 21.
       - name: Set up JDK 21
         uses: actions/setup-java@v5
         with:
@@ -158,8 +191,6 @@ jobs:
         with:
           gradle-version: '9.3.1'
 
-      # Robolectric tests use the same debug signing configuration
-      # as the debug APK build.
       - name: Create debug keystore
         shell: bash
         working-directory: ${{ github.workspace }}
@@ -186,14 +217,6 @@ jobs:
             touch .env
           fi
 
-      - name: Show Java version
-        run: |
-          java -version
-
-      - name: Show Gradle version
-        run: |
-          gradle --version
-
       - name: Run Unit and Robolectric Tests
         run: |
           gradle :app:testDebugUnitTest \
@@ -209,3 +232,14 @@ jobs:
             --stacktrace \
             -Dorg.gradle.workers.max=2 \
             "-Dorg.gradle.jvmargs=-Xmx3072m -XX:MaxMetaspaceSize=768m -Dfile.encoding=UTF-8"
+
+      - name: Upload Test & Lint Reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Gamebit-Reports-run${{ github.run_number }}-attempt${{ github.run_attempt }}
+          path: |
+            app/build/reports/tests/testDebugUnitTest/
+            app/build/reports/lint-results-debug.html
+          if-no-files-found: ignore
+          retention-days: 7

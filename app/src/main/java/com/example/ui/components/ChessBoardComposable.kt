@@ -2,12 +2,15 @@ package com.example.ui.components
 
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateOffsetAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectDragGestures
-import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -30,6 +33,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
@@ -53,11 +57,19 @@ import com.example.chess.Piece
 import com.example.chess.PieceColor
 import com.example.chess.PieceType
 import com.example.chess.Square
+import com.example.data.local.AnimationMode
 import com.example.ui.theme.BoardThemeColors
 import kotlin.math.PI
 import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.sin
+
+private data class DropSnapTransition(
+    val positionKey: String,
+    val piece: Piece,
+    val startCenterNorm: Offset,
+    val targetSquare: Square,
+)
 
 private data class SlideTransition(
     val positionKey: String,
@@ -169,6 +181,7 @@ fun ChessBoardView(
     pieceStyleId: String = "classic",
     moveAnimation: Boolean = true,
     reducedAnimations: Boolean = false,
+    animationMode: AnimationMode = AnimationMode.FULL,
     animationSpeed: Float = 1.0f,
     annotationMode: Boolean = false,
     lastMove: Move? = null,
@@ -189,11 +202,17 @@ fun ChessBoardView(
     var justDraggedMove by remember { mutableStateOf<Pair<Square, Square>?>(null) }
     var pendingPromotionMove by remember { mutableStateOf<Pair<Square, Square>?>(null) }
 
+    var pendingDropRelease by remember { mutableStateOf<Triple<Square, Square, Offset>?>(null) }
+    var dropSnapTransition by remember { mutableStateOf<DropSnapTransition?>(null) }
+    var dropSnapTriggerTarget by remember { mutableStateOf(false) }
+
     val animProgress = remember { Animatable(1f) }
     var lastObservedPosKey by remember { mutableStateOf(currentPosKey) }
     var lastObservedBoard by remember { mutableStateOf(state.board.copyOf()) }
     var activeTransition by remember { mutableStateOf<SlideTransition?>(null) }
     var animLaunchedKey by remember { mutableStateOf(currentPosKey) }
+
+    val effectiveAnimate = moveAnimation && !reducedAnimations && animationMode != AnimationMode.OFF
 
     if (currentPosKey != lastObservedPosKey) {
         val draggedPair = justDraggedMove
@@ -201,7 +220,32 @@ fun ChessBoardView(
             draggedPair.first == lastMove.from && draggedPair.second == lastMove.to
         justDraggedMove = null
 
-        val computed = if (moveAnimation && !reducedAnimations && !wasDragged) {
+        val dropRelease = pendingDropRelease
+        pendingDropRelease = null
+        val droppedPiece = if (lastMove != null) state.pieceAt(lastMove.to) else null
+        val canDropSnap = effectiveAnimate &&
+            wasDragged &&
+            dropRelease != null &&
+            lastMove != null &&
+            !lastMove.isCastling &&
+            dropRelease.first == lastMove.from &&
+            dropRelease.second == lastMove.to &&
+            droppedPiece != null
+
+        if (canDropSnap && dropRelease != null && lastMove != null && droppedPiece != null) {
+            dropSnapTransition = DropSnapTransition(
+                positionKey = currentPosKey,
+                piece = droppedPiece,
+                startCenterNorm = dropRelease.third,
+                targetSquare = lastMove.to,
+            )
+            dropSnapTriggerTarget = false
+        } else {
+            dropSnapTransition = null
+            dropSnapTriggerTarget = false
+        }
+
+        val computed = if (effectiveAnimate && !wasDragged) {
             buildSlideTransition(
                 prevBoard = lastObservedBoard,
                 nextState = state,
@@ -219,12 +263,58 @@ fun ChessBoardView(
         }
     }
 
-    LaunchedEffect(currentPosKey, moveAnimation, reducedAnimations) {
+    LaunchedEffect(dropSnapTransition?.positionKey, effectiveAnimate) {
+        if (dropSnapTransition != null && effectiveAnimate) {
+            dropSnapTriggerTarget = true
+        } else {
+            dropSnapTransition = null
+            dropSnapTriggerTarget = false
+        }
+    }
+
+    val activeDropSnap = dropSnapTransition?.takeIf {
+        it.positionKey == currentPosKey && effectiveAnimate
+    }
+    val dropTargetNorm = if (activeDropSnap != null) {
+        val col = if (flipped) 7 - activeDropSnap.targetSquare.file else activeDropSnap.targetSquare.file
+        val row = if (flipped) activeDropSnap.targetSquare.rank else 7 - activeDropSnap.targetSquare.rank
+        Offset((col + 0.5f) / 8f, (row + 0.5f) / 8f)
+    } else {
+        Offset.Zero
+    }
+    val animatedDropNorm by animateOffsetAsState(
+        targetValue = when {
+            activeDropSnap == null -> Offset.Zero
+            dropSnapTriggerTarget -> dropTargetNorm
+            else -> activeDropSnap.startCenterNorm
+        },
+        animationSpec = if (animationMode == AnimationMode.REDUCED) {
+            tween(
+                durationMillis = (110f / animationSpeed.coerceIn(0.5f, 2.0f)).toInt().coerceIn(55, 200),
+                easing = FastOutSlowInEasing,
+            )
+        } else {
+            spring(
+                dampingRatio = Spring.DampingRatioNoBouncy,
+                stiffness = Spring.StiffnessMediumLow,
+            )
+        },
+        finishedListener = {
+            if (dropSnapTriggerTarget) {
+                dropSnapTransition = null
+                dropSnapTriggerTarget = false
+            }
+        },
+        label = "piece_drop_snap_offset",
+    )
+
+    LaunchedEffect(currentPosKey, effectiveAnimate) {
         val transition = activeTransition
-        if (transition != null && transition.positionKey == currentPosKey && moveAnimation && !reducedAnimations) {
+        if (transition != null && transition.positionKey == currentPosKey && effectiveAnimate) {
             animProgress.snapTo(0f)
             animLaunchedKey = currentPosKey
-            val durMs = (200f / animationSpeed.coerceIn(0.5f, 2.0f)).toInt().coerceIn(75, 420)
+            val baseDur = if (animationMode == AnimationMode.REDUCED) 120f else 200f
+            val durMs = (baseDur / animationSpeed.coerceIn(0.5f, 2.0f)).toInt().coerceIn(75, 420)
             animProgress.animateTo(
                 targetValue = 1f,
                 animationSpec = tween(durationMillis = durMs, easing = FastOutSlowInEasing),
@@ -242,6 +332,7 @@ fun ChessBoardView(
             MoveGenerator.findKingSquare(state, state.sideToMove)
         } else null
     }
+    val isCheckmatePos = inCheckSquare != null && legalMoves.isEmpty()
 
     val activeLegalTargets = remember(selectedSquare, legalMoves) {
         val sel = selectedSquare ?: return@remember emptySet()
@@ -303,7 +394,9 @@ fun ChessBoardView(
             val sqSize = boardPx / 8f
 
             fun offsetToSquare(offset: Offset): Square? {
-                if (sqSize <= 0f) return null
+                if (sqSize <= 0f || offset.x < 0f || offset.y < 0f || offset.x > boardPx || offset.y > boardPx) {
+                    return null
+                }
                 val col = (offset.x / sqSize).toInt().coerceIn(0, 7)
                 val row = (offset.y / sqSize).toInt().coerceIn(0, 7)
                 val file = if (flipped) 7 - col else col
@@ -326,86 +419,117 @@ fun ChessBoardView(
             Canvas(
                 modifier = Modifier
                     .fillMaxSize()
+                    .clipToBounds()
                     .pointerInput(state, legalMoves, flipped, interactive, selectedDropPiece, annotationMode) {
                         if (!interactive) return@pointerInput
-                        detectTapGestures { offset ->
-                            val tapped = offsetToSquare(offset) ?: return@detectTapGestures
-                            if (annotationMode) {
-                                onToggleCircleSquare?.invoke(tapped)
-                                return@detectTapGestures
-                            }
-                            if (onSquareTappedRaw != null) {
-                                onSquareTappedRaw(tapped)
-                                return@detectTapGestures
-                            }
-                            if (selectedDropPiece != null) {
-                                val dropMove = legalMoves.firstOrNull {
-                                    it.dropPieceType == selectedDropPiece && it.to == tapped
+                        awaitEachGesture {
+                            val down = awaitFirstDown(requireUnconsumed = false)
+                            val downSq = offsetToSquare(down.position) ?: return@awaitEachGesture
+                            val touchSlop = viewConfiguration.touchSlop
+                            var dragStarted = false
+                            var lastPos = down.position
+
+                            while (true) {
+                                val event = awaitPointerEvent()
+                                val change = event.changes.firstOrNull { it.id == down.id }
+                                    ?: event.changes.firstOrNull()
+                                if (change == null) {
+                                    dragOrigin = null
+                                    dragPointerOffset = null
+                                    break
                                 }
-                                if (dropMove != null) {
-                                    onMoveSelected(dropMove)
-                                    return@detectTapGestures
-                                }
-                            }
-                            val currentSel = selectedSquare
-                            if (currentSel == null) {
-                                val p = state.pieceAt(tapped)
-                                if (p != null && (allowBothSides || p.color == humanSide)) {
-                                    selectedSquare = tapped
-                                }
-                            } else {
-                                tryExecuteOrQueue(currentSel, tapped)
-                            }
-                        }
-                    }
-                    .pointerInput(state, legalMoves, flipped, interactive, annotationMode) {
-                        if (!interactive || onSquareTappedRaw != null) return@pointerInput
-                        detectDragGestures(
-                            onDragStart = { offset ->
-                                val sq = offsetToSquare(offset) ?: return@detectDragGestures
-                                if (annotationMode) {
-                                    dragOrigin = sq
-                                    dragPointerOffset = offset
-                                    return@detectDragGestures
-                                }
-                                val p = state.pieceAt(sq)
-                                if (p != null && (allowBothSides || p.color == humanSide)) {
-                                    dragOrigin = sq
-                                    selectedSquare = sq
-                                    dragPointerOffset = offset
-                                }
-                            },
-                            onDrag = { change, _ ->
-                                change.consume()
-                                dragPointerOffset = change.position
-                            },
-                            onDragEnd = {
-                                val from = dragOrigin
-                                val endPos = dragPointerOffset
-                                dragOrigin = null
-                                dragPointerOffset = null
-                                if (from != null && endPos != null) {
-                                    val dest = offsetToSquare(endPos)
-                                    if (dest != null && dest != from) {
+                                lastPos = change.position
+
+                                if (!change.pressed) {
+                                    if (!dragStarted) {
+                                        // Treat as tap on downSq
                                         if (annotationMode) {
-                                            onToggleUserArrow?.invoke(from, dest)
+                                            onToggleCircleSquare?.invoke(downSq)
+                                        } else if (onSquareTappedRaw != null) {
+                                            onSquareTappedRaw(downSq)
+                                        } else if (selectedDropPiece != null) {
+                                            val dropMove = legalMoves.firstOrNull {
+                                                it.dropPieceType == selectedDropPiece && it.to == downSq
+                                            }
+                                            if (dropMove != null) {
+                                                onMoveSelected(dropMove)
+                                            }
                                         } else {
-                                            justDraggedMove = from to dest
-                                            tryExecuteOrQueue(from, dest)
+                                            val currentSel = selectedSquare
+                                            if (currentSel == null) {
+                                                val p = state.pieceAt(downSq)
+                                                if (p != null && (allowBothSides || p.color == humanSide)) {
+                                                    selectedSquare = downSq
+                                                }
+                                            } else {
+                                                tryExecuteOrQueue(currentSel, downSq)
+                                            }
+                                        }
+                                    } else {
+                                        val from = dragOrigin
+                                        dragOrigin = null
+                                        dragPointerOffset = null
+                                        if (from != null) {
+                                            val dest = offsetToSquare(lastPos)
+                                            if (dest != null && dest != from) {
+                                                if (annotationMode) {
+                                                    onToggleUserArrow?.invoke(from, dest)
+                                                } else {
+                                                    val wPx = size.width.toFloat().coerceAtLeast(1f)
+                                                    val hPx = size.height.toFloat().coerceAtLeast(1f)
+                                                    val cellPx = wPx / 8f
+                                                    val halfPx = cellPx * 0.5f
+                                                    val clampedX = lastPos.x.coerceIn(halfPx, (wPx - halfPx).coerceAtLeast(halfPx))
+                                                    val clampedY = lastPos.y.coerceIn(halfPx, (hPx - halfPx).coerceAtLeast(halfPx))
+                                                    pendingDropRelease = Triple(from, dest, Offset(clampedX / wPx, clampedY / hPx))
+                                                    justDraggedMove = from to dest
+                                                    tryExecuteOrQueue(from, dest)
+                                                }
+                                            } else if (dest == null) {
+                                                selectedSquare = null
+                                                pendingDropRelease = null
+                                            }
                                         }
                                     }
+                                    break
                                 }
-                            },
-                            onDragCancel = {
-                                dragOrigin = null
-                                dragPointerOffset = null
-                            },
-                        )
+
+                                if (!dragStarted) {
+                                    val dist = (lastPos - down.position).getDistance()
+                                    if (dist > touchSlop) {
+                                        if (onSquareTappedRaw != null) {
+                                            // Do not capture drags in raw-tap mode
+                                            break
+                                        }
+                                        val canDrag = if (annotationMode) {
+                                            true
+                                        } else {
+                                            val p = state.pieceAt(downSq)
+                                            p != null && (allowBothSides || p.color == humanSide)
+                                        }
+                                        if (!canDrag) {
+                                            // Allow parent scrollables to handle swipes starting on empty/opponent squares
+                                            break
+                                        }
+                                        dragStarted = true
+                                        dragOrigin = downSq
+                                        if (!annotationMode) {
+                                            selectedSquare = downSq
+                                        }
+                                        dragPointerOffset = lastPos
+                                        change.consume()
+                                    }
+                                } else {
+                                    dragPointerOffset = lastPos
+                                    change.consume()
+                                }
+                            }
+                        }
                     },
             ) {
                 val cell = size.width / 8f
                 val transition = activeTransition?.takeIf {
-                    it.positionKey == currentPosKey && moveAnimation && !reducedAnimations
+                    it.positionKey == currentPosKey && effectiveAnimate
                 }
                 val effectiveProgress = when {
                     transition == null -> 1f
@@ -438,6 +562,12 @@ fun ChessBoardView(
 
                         if (inCheckSquare == sq) {
                             drawRect(color = theme.checkHighlight, topLeft = topLeft, size = Size(cell, cell))
+                            drawCircle(
+                                color = Color(0xFFEF4444),
+                                radius = cell * 0.45f,
+                                center = Offset(topLeft.x + cell / 2f, topLeft.y + cell / 2f),
+                                style = Stroke(width = cell * 0.085f),
+                            )
                         }
 
                         highlights.firstOrNull { it.square == sq }?.let { customHl ->
@@ -451,8 +581,9 @@ fun ChessBoardView(
 
                         val piece = state.pieceAt(sq)
                         val isBeingDragged = !annotationMode && dragOrigin == sq && dragPointerOffset != null
-                        val isAnimDest = activeSlide != null &&
-                            (activeSlide.to == sq || activeSlide.rookSlide?.third == sq)
+                        val isDropSnapDest = activeDropSnap != null && activeDropSnap.targetSquare == sq
+                        val isAnimDest = (activeSlide != null &&
+                            (activeSlide.to == sq || activeSlide.rookSlide?.third == sq)) || isDropSnapDest
 
                         if (activeSlide?.capturedPiece != null && activeSlide.capturedSquare == sq) {
                             val shrink = 1f - 0.25f * effectiveProgress
@@ -505,7 +636,14 @@ fun ChessBoardView(
 
                     val startTl = squareTopLeft(activeSlide.from, cell)
                     val endTl = squareTopLeft(activeSlide.to, cell)
-                    val liftScale = 1f + 0.08f * sin(PI * effectiveProgress).toFloat()
+                    val promoPop = if (lastMove?.promotion != null && animationMode == AnimationMode.FULL && !reducedAnimations) {
+                        0.16f * sin(PI * effectiveProgress).toFloat()
+                    } else 0f
+                    val liftScale = if (animationMode == AnimationMode.REDUCED) {
+                        1f
+                    } else {
+                        1f + 0.08f * sin(PI * effectiveProgress).toFloat() + promoPop
+                    }
                     val liftedCell = cell * liftScale
                     val liftOffset = (liftedCell - cell) / 2f
                     val curTl = Offset(
@@ -513,6 +651,31 @@ fun ChessBoardView(
                         startTl.y + (endTl.y - startTl.y) * effectiveProgress - liftOffset,
                     )
                     drawChessPiece(activeSlide.piece, curTl, liftedCell, pieceStyleId)
+                }
+
+                // Draw smoothly settling dropped piece using Compose animateOffsetAsState
+                if (activeDropSnap != null) {
+                    val curCenterX = animatedDropNorm.x * size.width
+                    val curCenterY = animatedDropNorm.y * size.height
+                    val dropTl = Offset(curCenterX - cell / 2f, curCenterY - cell / 2f)
+                    drawChessPiece(activeDropSnap.piece, dropTl, cell, pieceStyleId)
+                }
+
+                // Checkmate badge (#) on mated king corner
+                val checkSq = inCheckSquare
+                if (isCheckmatePos && checkSq != null) {
+                    val tl = squareTopLeft(checkSq, cell)
+                    val badgeCenter = Offset(tl.x + cell * 0.80f, tl.y + cell * 0.20f)
+                    val badgeR = cell * 0.16f
+                    drawCircle(color = Color(0xFFEF4444), radius = badgeR, center = badgeCenter)
+                    drawCircle(color = Color.White, radius = badgeR, center = badgeCenter, style = Stroke(width = cell * 0.03f))
+                    // Sharp # hash glyph inside badge
+                    val d = badgeR * 0.32f
+                    val hLen = badgeR * 0.56f
+                    drawLine(Color.White, Offset(badgeCenter.x - d, badgeCenter.y - hLen), Offset(badgeCenter.x - d, badgeCenter.y + hLen), strokeWidth = cell * 0.028f)
+                    drawLine(Color.White, Offset(badgeCenter.x + d, badgeCenter.y - hLen), Offset(badgeCenter.x + d, badgeCenter.y + hLen), strokeWidth = cell * 0.028f)
+                    drawLine(Color.White, Offset(badgeCenter.x - hLen, badgeCenter.y - d), Offset(badgeCenter.x + hLen, badgeCenter.y - d), strokeWidth = cell * 0.028f)
+                    drawLine(Color.White, Offset(badgeCenter.x - hLen, badgeCenter.y + d), Offset(badgeCenter.x + hLen, badgeCenter.y + d), strokeWidth = cell * 0.028f)
                 }
 
                 // Draw arrows (engine best move, threats, user study annotations)
@@ -525,13 +688,31 @@ fun ChessBoardView(
                     )
                 }
 
-                // Draw floating piece under finger during drag
+                // Draw floating piece under finger during drag, clamped strictly within board bounds
                 val dOrigin = dragOrigin
                 val dPos = dragPointerOffset
                 if (!annotationMode && dOrigin != null && dPos != null) {
                     state.pieceAt(dOrigin)?.let { draggedPiece ->
-                        val topLeft = Offset(dPos.x - cell * 0.55f, dPos.y - cell * 0.55f)
-                        drawChessPiece(draggedPiece, topLeft, cell * 1.1f, pieceStyleId)
+                        val insideBoard = dPos.x in 0f..size.width && dPos.y in 0f..size.height
+                        val half = cell * 0.5f
+                        val clampedX = dPos.x.coerceIn(half, (size.width - half).coerceAtLeast(half))
+                        val clampedY = dPos.y.coerceIn(half, (size.height - half).coerceAtLeast(half))
+                        if (!insideBoard) {
+                            drawCircle(
+                                color = Color(0x66EF4444),
+                                radius = cell * 0.52f,
+                                center = Offset(clampedX, clampedY),
+                            )
+                        }
+                        val pieceSize = cell * 1.05f
+                        val topLeft = Offset(clampedX - pieceSize / 2f, clampedY - pieceSize / 2f)
+                        drawChessPiece(
+                            piece = draggedPiece,
+                            topLeft = topLeft,
+                            cellSize = pieceSize,
+                            pieceStyleId = pieceStyleId,
+                            alpha = if (insideBoard) 1f else 0.6f,
+                        )
                     }
                 }
             }

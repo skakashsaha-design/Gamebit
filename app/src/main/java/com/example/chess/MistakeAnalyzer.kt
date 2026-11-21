@@ -27,7 +27,11 @@ object MistakeAnalyzer {
         cpLoss: Int,
         quality: MoveQuality,
     ): MistakeAnalysisBreakdown? {
-        if (quality != MoveQuality.INACCURACY && quality != MoveQuality.MISTAKE && quality != MoveQuality.BLUNDER) {
+        if (quality != MoveQuality.INACCURACY &&
+            quality != MoveQuality.MISTAKE &&
+            quality != MoveQuality.MISS &&
+            quality != MoveQuality.BLUNDER
+        ) {
             return null
         }
 
